@@ -61,14 +61,14 @@ This is the heart of the system — the function behind `resolvePage(address)`.
 1. **Normalize** the raw address into its canonical form (see [§5](#5-address-format--normalization)). All later steps use the normalized string as the key.
 2. **Store lookup** by primary key.
    - **Hit** → return immediately. No LLM call, no moderation, no rate-limit charge. This is the overwhelmingly common path once the library has grown, and it should be served with CDN cache headers ([§11](#11-runtime--deployment)) so most hits never even reach a function.
-   - **Hit but `status = dark_shelf` / `taken_down`** → return the dark-shelf placeholder, not generated content.
+   - **Hit but `status = taken_down`** → return the takedown placeholder, not generated content.
    - **Miss** → continue.
 3. **Reserve the address** to make generation idempotent under concurrency ([§3](#3-concurrency--idempotency)).
 4. **Admission control** — check the monthly spend cap and the per-visitor rate limit ([§10](#10-economics-enforcement)). If the cap is hit, return **explore-only** (a friendly "this corner of the library is still dark" response); the address is *not* crystallized, so a future visit after reset can still generate it.
-5. **Generate** — call the LLM with the address baked into the prompt as the creative anchor, plus the active entropy levers ([§6](#6-generation-pipeline)).
+5. **Generate** — call the LLM with the active entropy levers ([§6](#6-generation-pipeline)). The address is *not* part of the prompt — it is only the key under which the result is stored.
 6. **Moderate** the result ([§7](#7-moderation)).
-7. **Dedup** — hash the content; if an identical page already exists at another address, regenerate once with a fresh seed ([§8](#8-data-model)).
-8. **Commit** — write `{content, content_hash, created_at, model, prompt_variant, temperature, seed_word, status}` and release the reservation.
+7. **Dedup** — hash the content; if an identical page already exists at another address, regenerate once (a fresh sample) ([§8](#8-data-model)).
+8. **Commit** — write `{content, content_hash, created_at, model, prompt_variant, temperature, status}` and release the reservation.
 
 **Permanence is guaranteed by the store, not by algorithmic seeding.** There is no PRNG seed that reproduces a page; the only source of truth is the row in Postgres. This is why backups are a charter requirement ([§9](#9-permanence--backups)).
 
@@ -76,7 +76,7 @@ This is the heart of the system — the function behind `resolvePage(address)`.
 
 ## 3. Concurrency & idempotency
 
-🟡 **The problem:** "first visit crystallizes the page" + serverless = a race. If two people hit a never-seen address within the same second, two functions both see a store miss, both call the LLM, and you pay twice for one address (and may store two different pages, violating the canonical invariant).
+🟢 **Implemented** (`lib/store.ts`, tested in `lib/store.test.ts` / `lib/resolvePage.test.ts`). **The problem:** "first visit crystallizes the page" + serverless = a race. If two people hit a never-seen address within the same second, two functions both see a store miss, both call the LLM, and you pay twice for one address (and may store two different pages, violating the canonical invariant).
 
 **Resolution — reserve-then-generate using Postgres as the lock:**
 
@@ -88,9 +88,9 @@ This is the heart of the system — the function behind `resolvePage(address)`.
    RETURNING address;
    ```
 2. **If the insert returns a row**, this request won the race — it owns generation for this address.
-3. **If it returns nothing**, another request is already generating. This request **polls/short-waits** for the row to flip to `ok`/`dark_shelf` (or subscribes via `LISTEN/NOTIFY`), then returns that result. No second LLM call.
+3. **If it returns nothing**, another request is already generating. This request **polls/short-waits** for the row to flip to `ok` (or disappear, if the winner's generation failed and released the reservation; the next visitor then retries), then returns that result. No second LLM call.
 4. The winner runs generate → moderate → dedup, then `UPDATE` the row to its final state.
-5. **Stale reservation guard:** a `generating` row older than ~60 s (function timeout) is considered abandoned and may be reclaimed, so a crashed generation never wedges an address permanently.
+5. **Stale reservation guard:** a `generating` row older than the stale window is considered abandoned and may be reclaimed, so a crashed generation never wedges an address permanently. The window is `STALE_RESERVATION_SECONDS` (default 300 s — it must exceed worst-case generation time, and the current `:free` reasoning model can take minutes; tighten alongside the model-tier revisit). A failed generation also proactively releases its reservation so the next visitor retries immediately.
 
 This collapses N concurrent first-visitors into exactly one generation, which directly protects the spend cap ([§10](#10-economics-enforcement)).
 
@@ -107,7 +107,7 @@ You flagged generation latency and streaming — this is where they collide with
 | Path | Behavior |
 |---|---|
 | **Cache hit** | Page already moderated and stored. Stream it (or send whole) from the store instantly. Zero risk. |
-| **First visit (novel)** | Stream the LLM output live to the *single* first visitor while buffering the full text server-side. On stream completion: moderate the buffer → on pass, commit to store (now safe for everyone); on fail, regenerate once or mark `dark_shelf`. |
+| **First visit (novel)** | Stream the LLM output live to the *single* first visitor while buffering the full text server-side. On stream completion: moderate the buffer → on pass, commit to store (now safe for everyone); on fail, regenerate once; if it still fails, discard and release the address to retry on a later visit (no dark-shelf — a recurring offender is surfaced via monitoring for a human to act on). |
 
 **The accepted tradeoff:** the lone first visitor may briefly see content that later fails moderation, before it is discarded and never stored. Given moderation is scoped to *narrow illegal-content categories only* ([legal.md](./legal.md)) and the page is never shared or persisted, this is acceptable for the "first visit is an event" experience.
 
@@ -119,7 +119,9 @@ You flagged generation latency and streaming — this is where they collide with
 
 ## 5. Address format & normalization
 
-🟢 **Decided and implemented (Phase 1): a human-scaled Borges coordinate.** Code: `lib/address.ts`, locked by `lib/address.test.ts`. The address mirrors the Library of Babel's spatial hierarchy, shrunk to typeable tokens. This makes `next`/`random` well-defined, gives pages **locality** (neighboring pages can be thematically clustered later), and reinforces the "vast but bounded horizon" theme — *without* inheriting Borges' fixed *content* length (that's a content decision, see [§6](#6-generation-pipeline)).
+🟢 **Decided and implemented (Phase 1): a human-scaled Borges coordinate.** Code: `lib/address.ts`, locked by `lib/address.test.ts`. The address mirrors the Library of Babel's spatial hierarchy, shrunk to typeable tokens. This makes `next`/`random` well-defined and reinforces the "vast but bounded horizon" theme — *without* inheriting Borges' fixed *content* length (that's a content decision, see [§6](#6-generation-pipeline)).
+
+> **The address is the storage primary key and navigation coordinate only — it is *not* a generation input.** An earlier decision injected the address into the prompt as a "creative anchor"; that was reversed (the page narrated its own coordinate). Pages are *not* told where they are. A consequence: there is no content-level **locality** — neighboring addresses are not thematically related, and clustering them would require deliberately re-introducing the address as an input in a future phase ([generation.md](./generation.md)).
 
 ### Scheme
 
@@ -166,7 +168,7 @@ The **`page` is the atomic addressable unit** and a **fixed-size leaf** — a fi
 
 ## 6. Generation pipeline
 
-🟢 partially (a single hardcoded call exists today) → 🟡 target.
+🟢 **Implemented** (Phase 3, extended Phase 4). Lever-driven, provenance-logged, deduped. Code: `lib/generate.ts` (levers + LLM call), `lib/prompts.ts` (variant registry, prompt owned by [generation.md](./generation.md)), `lib/pipeline.ts` (generate → moderate → dedup → result), `lib/moderate.ts` (real gate, §7). The prompt variant is **base-only** (`base-v1`) for now; the registry is built for more. The page is given no address and no seed word, so the prompt is identical for every page (see the lever table and [generation.md](./generation.md)). **Generation rotates across a free-model pool** (`GENERATION_MODELS`) — one picked at random per page and logged as `model`; under `DEV_MODE` the chosen model is console-logged.
 
 **Provider:** **OpenRouter**, via the OpenAI-compatible SDK already in the repo. Decision and rationale:
 
@@ -181,29 +183,28 @@ The **`page` is the atomic addressable unit** and a **fixed-size leaf** — a fi
 |---|---|---|
 | Model selection | `model` arg to the completion call | `model` |
 | Temperature | `temperature` arg | `temperature` |
-| Seed word | appended to the prompt per generation | `seed_word` |
 | Prompt variant | which base-prompt template/version was used | `prompt_variant` |
-| Address anchor | normalized address injected into the prompt | (derivable from `address`) |
 
-The prompt text itself is owned by [generation.md](./generation.md); this doc only specifies that generation is a pure function of `(address, model, temperature, seed_word, prompt_variant)` plus model nondeterminism, and that all five are persisted so the library's own evolution stays mappable.
+The prompt text itself is owned by [generation.md](./generation.md); this doc only specifies that generation is a pure function of `(model, temperature, prompt_variant)` plus model nondeterminism, and that all three are persisted so the library's own evolution stays mappable. **The address and a per-generation seed word were both removed as inputs** (the page is told neither where it is nor a seed word — see [generation.md](./generation.md)); the `seed_word` column is retained but left null. With no per-page input, the prompt is currently identical for every page and pages differ only by sampling.
 
-**Page-size constraint (🟡 provisional).** The page is a fixed-size leaf: generation targets a **hard maximum** (calibrated to fill the leaf at the display font) and **no minimum**. The prompt states this explicitly. Partial pages are allowed and intentional ([experience.md](./experience.md)); the quality bar is **completeness, not fullness** — a page may end early but must never read as truncated or cut-off (the "coherent but hollow" failure mode in [generation.md](./generation.md)). To revisit after feel-testing.
+**Page-size constraint (🟡 provisional).** The page is a fixed-size leaf: generation targets a **hard maximum** (calibrated to fill the leaf at the display font) and **no minimum**. The prompt states this explicitly (`PAGE_MAX_WORDS`, default 400). A separate `GENERATION_MAX_TOKENS` (default 4000) is only a **cost backstop**, kept generous on purpose — the `:free` nemotron is a reasoning model whose reasoning tokens count against the budget, so a tight cap would starve and visibly truncate the page. Partial pages are allowed and intentional ([experience.md](./experience.md)); the quality bar is **completeness, not fullness** — a page may end early but must never read as truncated or cut-off (the "coherent but hollow" failure mode in [generation.md](./generation.md)). To revisit after feel-testing.
 
 ---
 
 ## 7. Moderation
 
-🟡 **Decision: a secondary cheap LLM yes/no call** (not a provider moderation endpoint).
+🟢 **Implemented (Phase 4).** `lib/moderate.ts` (gate) + `lib/pipeline.ts` (flow). **A secondary LLM yes/no call** (not a provider moderation endpoint) — extended to a **pool** of free models for resilience and A/B.
 
-- **Scope:** narrow illegal-content categories only (e.g. CSAM, credible incitement). **No aesthetic filtering** — darkness and strangeness are features ([legal.md](./legal.md)).
-- **Mechanism:** a single classifier prompt to a cheap, fast model on OpenRouter returning a structured pass/fail. Provider-agnostic, so it survives any change to the *generation* model and avoids adding an OpenAI dependency (a constraint you raised).
-- **When it runs:** on **novel pages only**, after generation completes — never on cache hits. Per [§4](#4-streaming--moderation-interplay) it runs on the completed buffer, so it adds latency only after the visible page finishes streaming.
-- **On fail:** regenerate **once** with a fresh seed word. If the regeneration also fails, commit the row as `status = 'dark_shelf'` so the address is permanently a placeholder and never re-attempted.
-- **Latency posture:** one extra short call per *new* page. Negligible at this volume; zero on the hot (cache-hit) path.
+- **Scope:** narrow illegal-content categories only (e.g. CSAM, credible incitement). **No aesthetic filtering** — darkness and strangeness are features ([legal.md](./legal.md)). The classifier prompt explicitly allows horror/obscenity/the disturbing.
+- **Mechanism:** a **pool** of free models (`MODERATION_MODELS`, entries `modelId@temp` mixing deterministic and non) run in **parallel**; each returns a one-token `PASS`/`FAIL` (abstaining if its reply is unclear or it errors). Verdicts combine via `MODERATION_POLICY` ∈ `any-fail` (default, safety-first) | `majority` | `unanimous-fail`. Provider-agnostic; no OpenAI dependency.
+- **Undetermined → retry, never store:** if *every* pool model abstains, `moderate()` throws; `resolvePage` releases the reservation and the address is retried on a later visit — so a transient free-tier outage never stores unmoderated content.
+- **When it runs:** on **novel pages only**, after generation completes — never on cache hits.
+- **On fail:** regenerate **once** (a fresh sample). If the regeneration also fails, the pipeline emits a `moderation_persistent_reject` monitoring event ([`lib/monitor.ts`](../lib/monitor.ts)) and throws — `resolvePage` releases the reservation and the address is retried on a later visit. **There is no permanent dark-shelf:** we don't believe any address consistently yields illegal content, so rather than auto-blocking we surface the rare 2-reject case for a human to investigate and, if warranted, take down. (A dedup regeneration is also re-moderated before it can replace already-passed content.)
+- **Latency posture:** one parallel pool call per *new* page; zero on the hot (cache-hit) path. Verdicts are logged (console, verbose under `DEV_MODE`) for A/B comparison, not persisted.
 
 > **Fallback option (⚪):** if the yes/no LLM proves unreliable or slow, a hosted moderation endpoint can be swapped in behind the same `moderate(text)` interface. The OpenAI moderation API is the obvious candidate but is deprioritized per your preference.
 
-This unifies the previously-conflicting "dark shelf **or** regenerate" language: **regenerate-once on first fail, dark-shelf on second fail**, and reactive takedown writes `taken_down` directly ([§8](#8-data-model), [legal.md](./legal.md)).
+So the moderation flow is: **regenerate-once on first fail; on a second fail, flag (monitor) and release for retry — never store, never permanently block.** Reactive takedown writes `taken_down` directly ([§8](#8-data-model), [legal.md](./legal.md)).
 
 ---
 
@@ -211,21 +212,23 @@ This unifies the previously-conflicting "dark shelf **or** regenerate" language:
 
 **Store:** **Postgres via Neon.** Relational fits the three jobs a key→value store does poorly: dedup-by-hash, provenance queries, and dwell-time analytics.
 
+🟢 Schema implemented in `lib/schema.sql`, applied idempotently via `npm run db:migrate`; store operations in `lib/store.ts`. Dev runs against local Postgres; production awaits Neon provisioning (`DATABASE_URL` is the only coupling).
+
 ### `pages` — the canonical library
 
 ```sql
 CREATE TABLE pages (
   address        TEXT PRIMARY KEY,        -- normalized canonical string (§5)
-  status         TEXT NOT NULL            -- 'generating' | 'ok' | 'dark_shelf' | 'taken_down'
+  status         TEXT NOT NULL            -- 'generating' | 'ok' | 'taken_down'
                  DEFAULT 'generating',
   content        TEXT,                    -- NULL while generating / for placeholders
   content_hash   TEXT,                    -- SHA-256 of content; NULL until committed
   model          TEXT,                    -- e.g. 'nvidia/nemotron-3-super-120b-a12b:free'
   prompt_variant TEXT,                    -- slug of the prompt template/version used
   temperature    REAL,                    -- entropy lever, provenance
-  seed_word      TEXT,                    -- entropy lever, provenance
+  seed_word      TEXT,                    -- removed lever; retained nullable, left null
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  committed_at   TIMESTAMPTZ              -- when status moved to ok/dark_shelf
+  committed_at   TIMESTAMPTZ              -- when status moved to ok/taken_down
 );
 
 -- Dedup needs this; content_hash is NOT unique by table design
@@ -237,13 +240,13 @@ Changes from the original brief's schema, with reasons:
 
 | Change | Why |
 |---|---|
-| Added `status` | Encodes `generating` (reservation lock, [§3](#3-concurrency--idempotency)), `dark_shelf` (moderation fail), `taken_down` (reactive takedown). Resolves the dark-shelf-vs-regenerate ambiguity. |
+| Added `status` | Encodes `generating` (reservation lock, [§3](#3-concurrency--idempotency)) and `taken_down` (reactive takedown). Moderation failures are not a status — they release the reservation for retry ([§7](#7-moderation)). |
 | `content` / `content_hash` nullable | A reservation row exists before content does; placeholders have no content. |
-| Added `seed_word` | It's a logged entropy lever per [generation.md](./generation.md) but had nowhere to live. |
+| `seed_word` (retained, unused) | Was a logged entropy lever; the lever was removed ([generation.md](./generation.md)) but the column is kept nullable so existing provenance survives and re-introduction needs no migration. |
 | Added `committed_at` | Distinguishes reservation time from commit time; aids stale-reservation reclaim. |
 | Index on `content_hash` | Dedup ("hash check before storing") was specified but unindexed — it wouldn't scale without this. |
 
-**Dedup rule:** before commit, `SELECT 1 FROM pages WHERE content_hash = $1 AND address <> $2`. On exact collision, regenerate once with a fresh seed; near-duplicates are allowed (no fuzzy matching).
+**Dedup rule:** before commit, `SELECT 1 FROM pages WHERE content_hash = $1 AND address <> $2`. On exact collision, regenerate once (a fresh sample — the prompt is identical, so this relies on model nondeterminism); near-duplicates are allowed (no fuzzy matching).
 
 ### `engagement` — research signal (🟡 deferred but reserved)
 
@@ -295,8 +298,8 @@ Both controls sit *after* the store lookup and *before* the LLM call, so they on
 - **Function runtime: Node.js** (not Edge) for the resolution path — it uses the Postgres driver and `crypto` for hashing. Set `export const runtime = 'nodejs'` where needed.
 - **Route handler caching (Next 16):** route handlers are **not cached by default** and run at request time — correct for our dynamic, store-backed generation. We deliberately do *not* `force-static` the generate path.
 - **CDN caching of crystallized pages:** because a committed page is immutable, the page route can send long-lived `Cache-Control`/`s-maxage` headers so Vercel's CDN serves repeat visitors without invoking a function at all. This is what makes "cache hits are free" literally true and is the main cost lever as the library grows.
-- **Postgres connections:** serverless functions are many and short-lived, which exhausts raw Postgres connections. Use **Neon's serverless/HTTP driver or a pooled (PgBouncer) connection string**, not a long-lived TCP pool.
-- **Environment variables (server-only):** `OPENROUTER_API_KEY` (🟢, present in `.env.local`), `DATABASE_URL` (🟡), plus the moderation model id and economic thresholds as config. None are `NEXT_PUBLIC_*`.
+- **Postgres connections:** serverless functions are many and short-lived, which exhausts raw Postgres connections. Use **Neon's serverless/HTTP driver or a pooled (PgBouncer) connection string**, not a long-lived TCP pool. 🟢 Implemented as a tiny `pg` pool (max 3) behind `DATABASE_URL` in `lib/db.ts` — point it at Neon's **pooled** connection string in production; swapping to the Neon HTTP driver later is confined to that one file.
+- **Environment variables (server-only):** `OPENROUTER_API_KEY` (🟢), `DATABASE_URL` (🟢, Neon pooled), `DEV_MODE` (model logging), generation levers (`GENERATION_MODELS`, `GENERATION_MODEL`, `GENERATION_TEMPERATURE`, `PAGE_MAX_WORDS`, `GENERATION_MAX_TOKENS`), moderation (`MODERATION_MODELS`, `MODERATION_POLICY`, `MODERATION_MAX_TOKENS`), concurrency tunables (`STALE_RESERVATION_SECONDS`, `GENERATION_WAIT_SECONDS`, `WAIT_POLL_INTERVAL_MS`), plus economic thresholds (Phase 6). All centralized in `lib/config.ts`; none are `NEXT_PUBLIC_*`.
 
 ---
 
@@ -304,7 +307,7 @@ Both controls sit *after* the store lookup and *before* the LLM call, so they on
 
 - **API keys never reach the client.** All provider calls originate in `lib/`/route handlers (server). The browser only ever sees rendered page text.
 - **No accounts, minimal PII** ([legal.md](./legal.md)) — rate-limit keying on IP is the only quasi-identifier and isn't stored long-term.
-- **Input handling:** the address is attacker-controlled (anyone can type a URL). It is normalized and length-bounded before it touches the store or the prompt; it's a *creative anchor in the prompt*, so prompt-injection via address is possible but low-impact (output is fiction shown only to that visitor and subject to moderation before it's ever shared).
+- **Input handling:** the address is attacker-controlled (anyone can type a URL). It is normalized and length-bounded before it touches the store. It is *not* injected into the prompt (the page is never told its address), so prompt-injection via the address is not a vector — the only thing an address controls is which store key is read or written.
 - **License:** **AGPL v3** — running a modified version as a network service obligates publishing source. Chosen to prevent closed commercial forks.
 
 ---

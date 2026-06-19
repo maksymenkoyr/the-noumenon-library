@@ -1,10 +1,20 @@
 import OpenAI from "openai";
+import { config } from "./config";
 
 /**
- * Shared OpenRouter client. Configured via env (see lib/config.ts).
- * Lives on the Node.js runtime resolution path.
+ * Shared OpenRouter client, constructed lazily so importing this module
+ * never requires the API key — a missing key fails only at call time, with
+ * the clear error from config (mirrors lib/config.ts). Lives on the Node.js
+ * runtime resolution path.
  */
-export const openrouter = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY,
-});
+let client: OpenAI | undefined;
+
+export function getOpenRouter(): OpenAI {
+  if (!client) {
+    client = new OpenAI({
+      baseURL: "https://openrouter.ai/api/v1",
+      apiKey: config.openrouterApiKey,
+    });
+  }
+  return client;
+}

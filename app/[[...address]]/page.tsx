@@ -23,7 +23,7 @@ export default async function Page({
   if (!address) notFound();
 
   const canonical = formatAddress(address);
-  const text = await resolvePage(canonical);
+  const { status, text } = await resolvePage(canonical);
 
   return (
     <main className="mx-auto flex w-full max-w-2xl grow flex-col gap-8 p-8">
@@ -44,7 +44,12 @@ export default async function Page({
           </a>
         </nav>
       </header>
-      <p className="whitespace-pre-wrap">{text}</p>
+      {status === "ok" ? (
+        <p className="whitespace-pre-wrap">{text}</p>
+      ) : (
+        // Placeholder for taken_down; full styling is Phase 5.
+        <p className="italic text-neutral-400">{text}</p>
+      )}
     </main>
   );
 }

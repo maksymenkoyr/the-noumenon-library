@@ -5,6 +5,7 @@ import { resolvePage } from "@/lib/resolvePage";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const text = await resolvePage(formatAddress(randomAddress()));
-  return NextResponse.json({ text });
+  const address = formatAddress(randomAddress());
+  const { status, text } = await resolvePage(address);
+  return NextResponse.json({ address, status, text });
 }

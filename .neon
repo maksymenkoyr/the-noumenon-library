@@ -1,0 +1,10 @@
+{
+  "_init": {
+    "features": [
+      "database",
+      "auth"
+    ]
+  },
+  "orgId": "org-square-bird-29683055",
+  "projectId": "holy-firefly-48900842"
+}

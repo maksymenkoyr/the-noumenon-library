@@ -16,9 +16,13 @@ A phased build plan from the current prototype to a public, walkable library. Ph
 - `[x]` `GET /api/generate` calls OpenRouter and returns a page of text
 - `[x]` All resolution logic flows through `lib/resolvePage`, called directly from server components
 - `[x]` Address system live: `app/[[...address]]/page.tsx` + test-locked `lib/address.ts` (random / next / typed)
-- `[]` No store, no moderation, no rate limit; UI is a minimal page render (Phase 5)
+- `[x]` Page store live: generate-once/store-forever via `lib/store.ts` + `lib/resolvePage.ts` (Neon provisioned)
+- `[x]` Generation pipeline live: lever-driven, provenance-logged, deduped, free-model rotation (`lib/pipeline.ts`) — **🏁 M1 reached**
+- `[x]` Moderation live: free-model pool + policy gate, flag-and-retry on double-fail (monitoring event, no dark-shelf), reactive takedown script (`lib/moderate.ts`)
+- `[x]` Dev mode (`DEV_MODE`) logs which model each call runs
+- `[]` No rate limit / spend cap yet (Phase 6); UI is a minimal page render (Phase 5)
 
-Everything below turns that single hardcoded call into the system described in [Architecture](./architecture.md).
+Everything above turns that single hardcoded call into the system described in [Architecture](./architecture.md); what remains is safety, economics, permanence, and the reading experience.
 
 ---
 
@@ -66,11 +70,11 @@ Everything below turns that single hardcoded call into the system described in [
 **Goal:** generate-once, store-forever. Same address → same page.
 **Depends on:** Phase 1 (address is the primary key).
 
-- `[ ]` Provision Neon; wire pooled/serverless connection driver ([§11](./architecture.md))
-- `[ ]` Create `pages` table per the [§8](./architecture.md) schema (`status`, nullable `content`/`content_hash`, provenance cols, `content_hash` index)
-- `[ ]` `getPage` (store lookup) + `commitPage` (write final state)
-- `[ ]` Reserve-then-generate concurrency guard: `INSERT … ON CONFLICT DO NOTHING`, wait-for-winner, stale-reservation reclaim ([§3](./architecture.md))
-- `[ ]` Wire the full lifecycle into `resolvePage`: lookup → reserve → generate → commit ([§2](./architecture.md))
+- `[x]` Provision Neon; wire pooled/serverless connection driver ([§11](./architecture.md)) — `pg` behind `DATABASE_URL` in `lib/db.ts`; Neon provisioned (pooled string in `.env.local`), schema migrated and verified end-to-end
+- `[x]` Create `pages` table per the [§8](./architecture.md) schema (`status`, nullable `content`/`content_hash`, provenance cols, `content_hash` index) — `lib/schema.sql`, applied via `npm run db:migrate` (idempotent)
+- `[x]` `getPage` (store lookup) + `commitPage` (write final state) — `lib/store.ts`
+- `[x]` Reserve-then-generate concurrency guard: `INSERT … ON CONFLICT DO NOTHING`, wait-for-winner, stale-reservation reclaim ([§3](./architecture.md)) — stale window is env-tunable (`STALE_RESERVATION_SECONDS`, default 300 s while the `:free` reasoning model takes minutes; tighten with the model tier)
+- `[x]` Wire the full lifecycle into `resolvePage`: lookup → reserve → generate → commit ([§2](./architecture.md)) — done-when bar locked by `lib/resolvePage.test.ts`
 
 **Done when:** revisiting an address returns the identical stored page with no LLM call; two concurrent first-visitors trigger exactly one generation.
 
@@ -81,14 +85,14 @@ Everything below turns that single hardcoded call into the system described in [
 **Goal:** pages are address-anchored, varied, and provenance-logged.
 **Depends on:** Phase 2.
 
-- `[ ]` Inject the normalized address into the prompt as the creative anchor ([§6](./architecture.md), [Generation](./generation.md))
-- `[ ]` Entropy levers as config: `model`, `temperature`, `seed_word` (random per gen), `prompt_variant`
-- `[ ]` Page-size constraint in the prompt: hard max, no min, "complete not truncated" ([§6](./architecture.md))
-- `[ ]` Persist all provenance (`model`, `temperature`, `seed_word`, `prompt_variant`) on commit
-- `[ ]` Dedup: `content_hash` collision check → regenerate once with fresh seed ([§8](./architecture.md))
-- `[ ]` Stub `moderate()` as always-pass for now (real version in Phase 4)
+- `[~]` ~~Inject the normalized address into the prompt as the creative anchor~~ — **reversed.** The address is the store key + navigation coordinate only; it is *not* injected (the page narrated its own coordinate). See [§5](./architecture.md), [Generation](./generation.md)
+- `[x]` Entropy levers as config: `model`, `temperature`, `prompt_variant` — `chooseLevers()` in `lib/generate.ts`. **Variant is base-only (`base-v1`, the `written` prompt) for now; the registry holds one entry so the `imagined`/variation lever can wake later.** The **seed word lever was removed** (the page narrated it); no per-page input now, so pages differ by sampling alone
+- `[x]` Page-size constraint in the prompt: hard max, no min, "complete not truncated" ([§6](./architecture.md)) — `PAGE_MAX_WORDS` (default 400) in the prompt; `GENERATION_MAX_TOKENS` (default 4000) is only a cost backstop, deliberately generous for the reasoning model
+- `[x]` Persist provenance (`model`, `temperature`, `prompt_variant`) on commit — `commitPage` in `lib/store.ts` (the `seed_word` column is retained but left null)
+- `[x]` Dedup: `content_hash` collision check → regenerate once with fresh seed ([§8](./architecture.md)) — `contentExistsElsewhere` + retry in `lib/pipeline.ts`
+- `[x]` Stub `moderate()` as always-pass for now (real version in Phase 4) — `lib/moderate.ts`
 
-**Done when:** different addresses reliably yield different pages, every page row carries full provenance, and a 20-page private wander is possible. **🏁 M1 — walkable library.**
+**Done when:** different addresses reliably yield different pages, every page row carries full provenance, and a 20-page private wander is possible. **🏁 M1 — walkable library. ✅ Reached.**
 
 ---
 
@@ -97,12 +101,14 @@ Everything below turns that single hardcoded call into the system described in [
 **Goal:** never store unmoderated content. Required before any public exposure.
 **Depends on:** Phase 3.
 
-- `[ ]` Implement `moderate(text)` as a secondary cheap-LLM yes/no call, narrow illegal-content scope only ([§7](./architecture.md), [Legal](./legal.md))
-- `[ ]` Flow: fail → regenerate once with fresh seed → second fail → commit `status = dark_shelf`
-- `[ ]` Dark-shelf + taken-down placeholder rendering
-- `[ ]` Reactive-takedown path: set `status = taken_down` by address ([Legal](./legal.md))
+- `[x]` Implement `moderate(text)` as a secondary LLM yes/no call, narrow illegal-content scope only ([§7](./architecture.md), [Legal](./legal.md)) — `lib/moderate.ts`. **A pool of free models** (`MODERATION_MODELS`, mixed deterministic/non) run in parallel; verdicts combine via `MODERATION_POLICY` (default `any-fail`); undetermined (all abstain) → throw → retry later
+- `[x]` Flow: fail → regenerate once (fresh sample) → second fail → emit `moderation_persistent_reject` (`lib/monitor.ts`) + throw → reservation released, retried later (no dark-shelf) — `lib/pipeline.ts`
+- `[x]` Taken-down placeholder rendering — `resolvePage` returns `{status, text}`; `app/[[...address]]/page.tsx` renders it muted/italic
+- `[x]` Reactive-takedown path: set `status = taken_down` by address ([Legal](./legal.md)) — `takeDownPage` (upsert) + `npm run takedown -- <address>` script
 
-**Done when:** failing content is never persisted as `ok`; dark-shelf and takedown both resolve to placeholders.
+**Done when:** failing content is never persisted as `ok`; persistent rejects are flagged for human review; takedown resolves to a placeholder. **✅ Met.**
+
+**Also landed this phase (user-requested):** free-model **generation rotation** (`GENERATION_MODELS` — the dormant "different gravity wells" variety lever woke; chosen model logged as provenance) and **dev mode** (`DEV_MODE`; console-logs which model each generation/moderation runs).
 
 ---
 
@@ -114,7 +120,7 @@ Everything below turns that single hardcoded call into the system described in [
 - `[ ]` Fixed-size leaf rendering: top-aligned text, honest whitespace, max calibrated to fill at display font ([Experience](./experience.md))
 - `[ ]` Navigation UI: random / next / typed-address controls
 - `[ ]` Stream generation live to the first visitor; moderate the completed buffer before commit ([§4](./architecture.md))
-- `[ ]` Explore-only and dark-shelf states surfaced in the UI
+- `[ ]` Explore-only state surfaced in the UI
 
 **Done when:** a first visit streams in and reads as a finished leaf; revisits load instantly; partial pages look deliberate.
 
@@ -179,7 +185,10 @@ Everything below turns that single hardcoded call into the system described in [
 | Decision               | Resolution                                                                                  |
 | ---------------------- | ------------------------------------------------------------------------------------------- |
 | Generation prompt base | Established — see [Generation](./generation.md)                                             |
-| Entropy levers         | Seed word injection + `"you do not know what you are"` as primary levers                    |
+| Entropy levers         | `"you do not know what you are"` (verbatim) + temperature + **free-model rotation** (`GENERATION_MODELS`); **seed word removed** and the **address is not injected** — the page is told neither what nor where it is |
+| Prompt variant         | Base-only (`base-v1`, the `written` prompt) for now; registry ready for `imagined`/mutations |
+| Generation temperature | Default 0.9 (coherent start; library ages stranger over time); env-tunable, retuned in Phase 9 |
+| Generation models      | Free-model pool, picked at random per page (revives the "gravity wells" variety lever) |
 | Navigation model       | Wandering-only (random / next / typed address); no semantic search                          |
 | Address topology       | Human-scaled Borges coordinates: `gallery/wall/shelf/volume/page` ([§5](./architecture.md)) |
 | Gallery token format   | Lowercase `[a-z0-9-]`, 1–12 chars, hyphen never first/last; lowercasing is the only normalization transform |
@@ -190,7 +199,10 @@ Everything below turns that single hardcoded call into the system described in [
 | Permanence model       | Store-based, not algorithmic seeding                                                        |
 | Page store             | Neon Postgres                                                                               |
 | LLM provider           | OpenRouter (swappable; model tier to revisit for latency)                                   |
-| Moderation method      | Secondary cheap LLM yes/no call; narrow illegal-content only                                |
+| Model tier             | Free models only for now (no spend), both generation and moderation                         |
+| Moderation method      | Pool of free LLMs (mixed deterministic/non) → PASS/FAIL combined by policy (default `any-fail`); narrow illegal-content only; undetermined → retry, never store unmoderated |
+| Reactive takedown      | `npm run takedown -- <address>` script (no admin HTTP endpoint — would be an abuse vector); intake UI deferred to Phase 9 |
+| Dev mode               | `DEV_MODE` env (auto-on outside production) → console-logs which model each call runs        |
 | License                | AGPL v3                                                                                     |
 | Funding model          | Public donation fuel tank; no subscription (system parked)                                  |
 | Multi-user model       | One shared canonical library; no per-user sandboxes                                         |
@@ -199,8 +211,10 @@ Everything below turns that single hardcoded call into the system described in [
 
 ## Provisional / to revisit
 
-- **Page-size aesthetic** — validate partial pages against the "books are usually full" instinct; may add a soft minimum (Phase 5)
-- **Model tier** — stay on `:free` or move to a cheap paid model for latency/no-train (Phase 3/9)
+- **Page-size aesthetic** — validate partial pages against the "books are usually full" instinct; may add a soft minimum (Phase 5). `PAGE_MAX_WORDS` default 400, env-tunable
+- **Model tier** — **free models only for now** (no spend, both generation and moderation). Revisit a cheap paid tier for latency/no-train at Phase 9. The `:free` nemotron is a reasoning model: first-gen takes ~10s+ and emits reasoning tokens (hence the generous `GENERATION_MAX_TOKENS` backstop). Free-tier moderation also has availability gaps — the parallel pool + `any-fail`/undetermined-retry posture is the mitigation
+- **Moderation policy** — default `any-fail` (safety-first) may over-block during free-model experimentation, creating permanent dark shelves; the pool/policy is env-tunable while it's being A/B'd
+- **Prompt variation** — wake the dormant lever (e.g. `imagined` sibling, structural mutations) once the base texture is feel-tested (Phase 9)
 - **Streaming exposure** — live-stream-then-moderate vs. moderate-then-reveal ([§4](./architecture.md))
 
 ---
