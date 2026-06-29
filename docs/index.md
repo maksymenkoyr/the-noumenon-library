@@ -26,8 +26,9 @@ Named after Kant's *noumenon*: the thing that exists beyond what can ever be ful
 
 ## Current State
 
-Early prototype. The generation loop works end-to-end: `GET /api/generate` calls OpenRouter, returns a page of text. No address system, no store, no UI yet.
+A walkable library (M1 reached), now with a reading experience (Phase 5). You wander by address — random, next, or typed — and each address crystallizes once on first visit and persists forever. First visits reveal via a Suspense boundary (shell streams instantly, the leaf swaps in when it crystallizes); revisits load instantly. Moderation gates every commit; failures and takedowns render graceful placeholder leaves. See the [Roadmap](./roadmap.md) for what's next (economics & safety controls, permanence, the AI reader layer).
 
-- **Runtime**: Next.js App Router + TypeScript
-- **Model in use**: `nvidia/nemotron-3-super-120b-a12b:free` via OpenRouter
+- **Runtime**: Next.js App Router + TypeScript + Tailwind
+- **Store**: Neon Postgres (generate-once / store-forever)
+- **Models in use**: a free-model generation pool (default `nvidia/nemotron-3-super-120b-a12b:free`) via OpenRouter; a separate free-model pool for moderation
 - **Prompt in use**: see [Generation](./generation.md)

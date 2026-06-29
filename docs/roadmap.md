@@ -20,7 +20,8 @@ A phased build plan from the current prototype to a public, walkable library. Ph
 - `[x]` Generation pipeline live: lever-driven, provenance-logged, deduped, free-model rotation (`lib/pipeline.ts`) — **🏁 M1 reached**
 - `[x]` Moderation live: free-model pool + policy gate, flag-and-retry on double-fail (monitoring event, no dark-shelf), reactive takedown script (`lib/moderate.ts`)
 - `[x]` Dev mode (`DEV_MODE`) logs which model each call runs
-- `[]` No rate limit / spend cap yet (Phase 6); UI is a minimal page render (Phase 5)
+- `[x]` Reading experience live: fixed-size leaf, typed/random/next navigation, Suspense-revealed first visit (shell streams instantly, leaf swaps in on crystallize), explore-only fallback (`app/[[...address]]/`) — **Phase 5**
+- `[]` No rate limit / spend cap yet (Phase 6)
 
 Everything above turns that single hardcoded call into the system described in [Architecture](./architecture.md); what remains is safety, economics, permanence, and the reading experience.
 
@@ -117,12 +118,12 @@ Everything above turns that single hardcoded call into the system described in [
 **Goal:** the page _feels_ like a page; first-visit latency is masked.
 **Depends on:** Phases 3–4.
 
-- `[ ]` Fixed-size leaf rendering: top-aligned text, honest whitespace, max calibrated to fill at display font ([Experience](./experience.md))
-- `[ ]` Navigation UI: random / next / typed-address controls
-- `[ ]` Stream generation live to the first visitor; moderate the completed buffer before commit ([§4](./architecture.md))
-- `[ ]` Explore-only state surfaced in the UI
+- `[x]` Fixed-size leaf rendering: top-aligned text, honest whitespace, max calibrated to fill at display font ([Experience](./experience.md)) — `app/[[...address]]/leaf.tsx` (`Leaf`/`CrystallizingLeaf`/`PlaceholderLeaf`, shared `LEAF_HEIGHT` so no layout shift); serif reading face (`Lora`) via `app/layout.tsx`
+- `[x]` Navigation UI: random / next / typed-address controls — `app/[[...address]]/nav.tsx` (`"use client"`); typed input reuses the pure `lib/address.ts` `normalizeAddress` to validate inline, full-page navigation to keep `random` re-resolving server-side
+- `[~]` ~~Stream generation live to the first visitor~~ — **landed as Suspense reveal, not live token streaming** (decided: the `:free` reasoning model emits reasoning tokens before any page text, so token-by-token adds little now). The shell (address + nav) streams instantly; the finished leaf swaps into a `<Suspense>` boundary when generation completes. Moderation already gates the commit (Phase 4). The same UI can host true token streaming later with no rewrite ([§4](./architecture.md))
+- `[x]` Explore-only state surfaced in the UI — a render-only state (no row persisted): a generation/moderation failure or wait-timeout from `resolvePage` renders the explore-only leaf instead of an error page; the Phase 6 spend cap will reuse it
 
-**Done when:** a first visit streams in and reads as a finished leaf; revisits load instantly; partial pages look deliberate.
+**Done when:** a first visit streams in and reads as a finished leaf; revisits load instantly; partial pages look deliberate. **✅ Met** (shell + crystallizing fallback flush at ~0.5 s, leaf streams in on completion; cache hit renders synchronously with no fallback flash).
 
 ---
 

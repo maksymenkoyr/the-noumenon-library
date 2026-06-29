@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import {
   addressPath,
@@ -6,7 +7,10 @@ import {
   normalizeAddress,
   randomAddress,
 } from "@/lib/address";
-import { resolvePage } from "@/lib/resolvePage";
+import { resolvePage, type ResolvedPage } from "@/lib/resolvePage";
+import { getPage } from "@/lib/store";
+import { CrystallizingLeaf, Leaf, PlaceholderLeaf } from "./leaf";
+import { Nav } from "./nav";
 
 export const runtime = "nodejs";
 
@@ -20,36 +24,56 @@ export default async function Page({
   if (!segments) redirect(addressPath(randomAddress()));
 
   const address = normalizeAddress(segments);
+  // notFound() must fire before any Suspense boundary so an invalid address gets
+  // a real 404, not a 200 with noindex (Next streaming guide, "The HTTP contract").
   if (!address) notFound();
 
   const canonical = formatAddress(address);
-  const { status, text } = await resolvePage(canonical);
+  const nextHref = addressPath(nextAddress(address));
+
+  // One fast lookup decides the shape of the response. A committed page renders
+  // synchronously (instant revisits, no fallback flash); only a first visit (or
+  // an in-flight one by another visitor) suspends behind the crystallizing leaf.
+  const existing = await getPage(canonical);
 
   return (
     <main className="mx-auto flex w-full max-w-2xl grow flex-col gap-8 p-8">
-      <header className="flex items-baseline justify-between gap-4 font-mono text-sm text-neutral-500">
-        <span>{canonical}</span>
-        {/* Plain anchors: "random" must re-resolve server-side on every
-            click, which Link prefetching/caching would defeat. */}
-        <nav className="flex gap-4">
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-          <a href="/" className="hover:text-neutral-900">
-            random
-          </a>
-          <a
-            href={addressPath(nextAddress(address))}
-            className="hover:text-neutral-900"
-          >
-            next →
-          </a>
-        </nav>
+      <header className="flex items-baseline gap-4 font-mono text-sm text-neutral-500">
+        <span className="shrink-0">{canonical}</span>
+        <Nav nextHref={nextHref} />
       </header>
-      {status === "ok" ? (
-        <p className="whitespace-pre-wrap">{text}</p>
+      {existing?.status === "ok" ? (
+        <Leaf>{existing.content ?? ""}</Leaf>
+      ) : existing?.status === "taken_down" ? (
+        <PlaceholderLeaf variant="taken_down" />
       ) : (
-        // Placeholder for taken_down; full styling is Phase 5.
-        <p className="italic text-neutral-400">{text}</p>
+        <Suspense fallback={<CrystallizingLeaf />}>
+          <PageBody address={canonical} />
+        </Suspense>
       )}
     </main>
   );
+}
+
+/**
+ * The slow path: crystallize (or wait for) a never-seen page, behind a Suspense
+ * boundary so the shell above paints immediately. resolvePage throws on a
+ * generation/moderation failure or wait timeout (it releases the reservation
+ * first, so nothing is persisted) — we render explore-only rather than letting
+ * it bubble to an error page. The address simply stays dark until a later visit.
+ */
+async function PageBody({ address }: { address: string }) {
+  // Resolve to a plain value first; keep JSX construction out of the try/catch
+  // (render errors wouldn't be caught there anyway — react-hooks/error-boundaries).
+  let resolved: ResolvedPage | "explore";
+  try {
+    resolved = await resolvePage(address);
+  } catch {
+    resolved = "explore";
+  }
+
+  if (resolved === "explore") return <PlaceholderLeaf variant="explore" />;
+  if (resolved.status === "ok") return <Leaf>{resolved.text}</Leaf>;
+  // taken_down can surface here if a takedown lands while we waited.
+  return <PlaceholderLeaf variant="taken_down" />;
 }

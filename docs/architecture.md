@@ -98,6 +98,8 @@ This collapses N concurrent first-visitors into exactly one generation, which di
 
 ## 4. Streaming & moderation interplay
 
+🟡 **Phase 5 shipped the *reveal*, not yet live token streaming.** The current build uses a **Suspense reveal**: the static shell (address + nav) streams instantly while a first visit generates behind a `<Suspense>` boundary, and the finished leaf swaps in only after `resolvePage` completes — i.e. after generation **and** moderation **and** commit. So today the first visitor sees the *moderate-then-reveal* posture for free (they never see pre-moderation tokens), at the cost of the live-writing effect. The token-by-token path below is the planned upgrade and slots behind the same UI; it was deferred because the `:free` reasoning model emits reasoning tokens (a long blank pause) before any page text, so live tokens add little until the model tier improves ([Roadmap](./roadmap.md) Phase 5). The rest of this section describes that target.
+
 You flagged generation latency and streaming — this is where they collide with the "never store unmoderated content" rule, so it deserves its own treatment.
 
 **The tension:** streaming tokens to the browser as they arrive is the right cure for first-visit latency (the page *appears* to write itself, which also fits the artwork). But moderation can only judge a *complete* page, and we must not persist or share content that fails moderation.
