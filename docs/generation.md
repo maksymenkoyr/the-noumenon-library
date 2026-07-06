@@ -10,22 +10,25 @@ The generation prompt is **the highest-leverage artifact in the project**. It re
 
 ## Current base prompt
 
-> *You are a page in an infinite library. Every text that could ever be written already exists here. You do not know what you are. Generate the text found on this page.*
+> *An endless library holds every text that could ever be written. You are reading one page from it; set down exactly what is on it. You do not know what it is or where it sits.*
 
-These base sentences are kept **verbatim** in the live `base-v1` variant (`lib/prompts.ts`), wrapped only with the page-size constraint:
+The live `base-v2` variant (`lib/prompts.ts`) frames the model as a **transcriber of a found page**, then injects a random **form/register** and the page-size constraint:
 
 ```
-You are a page in an infinite library. Every text that could ever be written
-already exists here. You do not know what you are.
+An endless library holds every text that could ever be written. You are reading
+one page from it; set down exactly what is on it. You do not know what it is or
+where it sits.
 
-Generate the text found on this page. It may be a brief fragment or fill the
-leaf, but no more than about {maxWords} words, and it must read as a finished
-whole — never cut off mid-thought.
+The writing on this page reads like {form}. It may be a brief fragment or fill
+the leaf, but no more than about {maxWords} words, and it must read as a
+finished whole — never cut off mid-thought.
 ```
 
-> **The page is told neither a seed word nor its address.** It does not know what it is or where it is, and so cannot narrate its own scaffolding (the early seed-word/coordinate prompts produced pages like *"anchored at the coordinate m4/2/3/5/100"* and *"a word surfaces as I am read: candle"* — exactly the self-orientation `"you do not know what you are"` exists to prevent). The **address is the storage key and navigation coordinate only — not a generation input.**
+> **Why the reframe (`base-v1` → `base-v2`).** The earlier prompt — *"You are a page in an infinite library … Generate the text found on this page"* — used a second-person "you **are** a page", which made the model narrate *being* a page (*"I am a page, thin and quiet…"*): the very self-orientation `"you do not know what you are"` was meant to prevent. `base-v2` makes the model a *reader/transcriber* of the page and re-aims the not-knowing at the page itself (*"you do not know what it **is**"*). The text is still framed as **found**, not written to order.
 
-> **Implementation status:** levers live in `lib/generate.ts` (`chooseLevers` + `generatePage`); variant registry in `lib/prompts.ts`. Implemented: **`you do not know what you are`** (verbatim), **temperature** (default 0.9 — coherent start; env `GENERATION_TEMPERATURE`), and the **page-size constraint** (`PAGE_MAX_WORDS`, default 400). Because no seed word or address enters the prompt, **the prompt is identical for every page** — pages differ by the model's sampling nondeterminism alone. **Prompt variation is base-only for now** (one variant; structural mutations are the dormant lever). Provenance persisted on commit: `model`, `temperature`, `prompt_variant` (the `seed_word` column is kept but left null).
+> **The page is still told neither its address nor a free "seed word".** The address is the storage key and navigation coordinate only. The one deliberate per-page input is the **form/register** (below) — a bounded register hint, not a coordinate or a noun to weave in — chosen so pages diverge instead of converging on one voice.
+
+> **Implementation status:** levers live in `lib/generate.ts` (`chooseLevers` + `generatePage`); variant registry + form pool in `lib/prompts.ts`. Live levers: the **transcriber framing**, a random **form/register** (`GENERATION_FORMS`, ~30 kinds), **per-page temperature jitter** (base 0.9 ± `GENERATION_TEMPERATURE_JITTER`, default 0.2, clamped), **model selection** (currently pinned to one model — see below), and the **page-size constraint** (`PAGE_MAX_WORDS`, default 400). Provenance persisted on commit: `model`, `temperature` (the jittered value), `prompt_variant`, and the chosen **form** (stored in the reserved `seed_word` column).
 
 ---
 
@@ -52,11 +55,13 @@ Entropy levers stack. The uncanny target zone lives in the middle of the journey
 | Prompt variation | Structural mutations to the base prompt. The prompt itself becomes entropy over time. |
 | `"you do not know what you are"` | Removes the model's self-orientation; prevents purposeful generation. One of the most effective single phrases found so far. |
 
-The single confirmed-effective lever in the live prompt is `"you do not know what you are"`; temperature and prompt variation are wired but not yet exercised for range (Phase 9 tuning).
+Live levers now: the **transcriber framing** (replacing `"you do not know what you are"`, which invited self-narration), a random **form/register** per page, and **per-page temperature jitter**. Model mixing is wired but temporarily pinned to one model. Full range-tuning is still Phase 9.
 
-### Removed: seed word injection
+### Seed word → form/register lever
 
-Appending a random word per generation was an early lever ("anchors the page without determining it"). **It was removed** — in practice the model *narrated* the word rather than letting it color the page (*"a word surfaces as I am read: candle"*), the same self-orientation failure as telling the page its address. Both were stripped so the page knows neither what nor where it is. The trade: with no per-page input, the prompt is identical for every page and the only deliberate source of variety is sampling nondeterminism until another lever (model mixing, prompt variation) wakes. Re-introducing a seed — injected so it shapes texture without being named — remains a possible future lever.
+Appending a random *word* per generation was an early lever ("anchors the page without determining it"). It was **removed** because the model narrated the word rather than letting it color the page (*"a word surfaces as I am read: candle"*) — the same self-orientation failure as telling the page its address.
+
+It has been **revived in a safer shape**: instead of a bare noun to weave in, each page gets a random **form/register** — *"the writing on this page reads like a ship's log / an unsent letter / a legal statute / a lullaby …"* (`GENERATION_FORMS` in `lib/prompts.ts`, ~30 kinds spanning factual / interior / formal / vernacular). A register shapes *how* the page is written rather than naming a thing to be *about*, so it diversifies output without inviting narration. The chosen form is logged per page in the reserved `seed_word` column (research signal: which forms produce pages worth pausing on). **Caveat:** a register can still leak (a page may announce it is a ship's log); if that proves common, tighten the framing or drop the noisier forms. This is the main prompt-side variety lever while model rotation is pinned to a single model.
 
 ---
 

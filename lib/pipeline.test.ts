@@ -63,7 +63,9 @@ describe("generatePipeline", () => {
     expect(result.content).toBe("a unique page");
     expect(result.provenance.model).toBeTruthy();
     expect(result.provenance.temperature).toBeGreaterThan(0);
-    expect(result.provenance.prompt_variant).toBe("base-v1");
+    expect(result.provenance.prompt_variant).toBe("base-v2");
+    // The form/register lever is logged (in the seed_word column).
+    expect(result.provenance.seed_word).toBeTruthy();
     expect(generateMock).toHaveBeenCalledTimes(1);
   });
 

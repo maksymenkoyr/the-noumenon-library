@@ -26,6 +26,9 @@ export interface PageProvenance {
   model: string;
   prompt_variant?: string;
   temperature?: number;
+  // The chosen form/register lever, stored in the reserved seed_word column
+  // (docs/generation.md, architecture §8) — a seed-like input, revived.
+  seed_word?: string;
 }
 
 /** SHA-256 of page content — the dedup key (docs/architecture.md §8). */
@@ -98,9 +101,8 @@ export async function commitPage(
   provenance: PageProvenance,
 ): Promise<void> {
   const contentHash = hashContent(content);
-  // seed_word is intentionally not written — the lever was removed. The
-  // column is kept (nullable) so existing provenance survives; new rows leave
-  // it null.
+  // seed_word now carries the form/register lever (docs/generation.md); it stays
+  // nullable, so callers that don't set it (e.g. tests) simply leave it null.
   await query(
     `UPDATE pages SET
        status = 'ok',
@@ -109,6 +111,7 @@ export async function commitPage(
        model = $4,
        prompt_variant = $5,
        temperature = $6,
+       seed_word = $7,
        committed_at = now()
      WHERE address = $1`,
     [
@@ -118,6 +121,7 @@ export async function commitPage(
       provenance.model,
       provenance.prompt_variant ?? null,
       provenance.temperature ?? null,
+      provenance.seed_word ?? null,
     ],
   );
 }

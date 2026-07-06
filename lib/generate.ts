@@ -1,7 +1,11 @@
 import { config } from "./config";
 import { devLog } from "./log";
 import { getOpenRouter } from "./openrouter";
-import { buildPrompt, DEFAULT_PROMPT_VARIANT } from "./prompts";
+import {
+  buildPrompt,
+  DEFAULT_PROMPT_VARIANT,
+  GENERATION_FORMS,
+} from "./prompts";
 
 /**
  * Generation is a pure function of its levers plus model nondeterminism, and
@@ -16,20 +20,36 @@ export interface GenerationLevers {
   model: string;
   temperature: number;
   promptVariant: string;
+  form: string;
+}
+
+function pick<T>(pool: readonly T[]): T {
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** Base temperature ± a uniform jitter, clamped to a valid sampling range. */
+function jitteredTemperature(): number {
+  const offset = (Math.random() * 2 - 1) * config.temperatureJitter;
+  return Math.min(2, Math.max(0.1, config.temperature + offset));
 }
 
 /**
- * Pick the entropy levers for one generation: a random model from the pool
- * (logged as provenance) at the hot generation temperature.
+ * Pick the entropy levers for one generation: a random model from the pool, a
+ * random form/register for the page, and a per-page jittered temperature — all
+ * logged as provenance so the library's own evolution stays mappable.
  */
 export function chooseLevers(): GenerationLevers {
-  const pool = config.generationModels;
-  const model = pool[Math.floor(Math.random() * pool.length)];
-  devLog(`generate model=${model} temp=${config.temperature}`);
+  const model = pick(config.generationModels);
+  const form = pick(GENERATION_FORMS);
+  const temperature = jitteredTemperature();
+  devLog(
+    `generate model=${model} temp=${temperature.toFixed(2)} form="${form}"`,
+  );
   return {
     model,
-    temperature: config.temperature,
+    temperature,
     promptVariant: DEFAULT_PROMPT_VARIANT,
+    form,
   };
 }
 
@@ -37,6 +57,7 @@ export function chooseLevers(): GenerationLevers {
 export async function generatePage(levers: GenerationLevers): Promise<string> {
   const prompt = buildPrompt(levers.promptVariant, {
     maxWords: config.pageMaxWords,
+    form: levers.form,
   });
 
   const response = await getOpenRouter().chat.completions.create({

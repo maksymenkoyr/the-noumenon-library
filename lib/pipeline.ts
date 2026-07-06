@@ -24,6 +24,7 @@ function provenanceFrom(levers: GenerationLevers): PageProvenance {
     model: levers.model,
     temperature: levers.temperature,
     prompt_variant: levers.promptVariant,
+    seed_word: levers.form,
   };
 }
 

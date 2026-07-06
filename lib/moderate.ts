@@ -19,6 +19,17 @@ export interface ModerationResult {
   ok: boolean;
 }
 
+// One loud warning per process when the safety gate is switched off, so a
+// temporary MODERATION_ENABLED=false can never be silently left on.
+let warnedDisabled = false;
+function warnModerationDisabled(): void {
+  if (warnedDisabled) return;
+  warnedDisabled = true;
+  console.warn(
+    "[noumenon] ⚠ MODERATION DISABLED — storing pages unmoderated (MODERATION_ENABLED=false)",
+  );
+}
+
 const MODERATION_PROMPT = [
   "You are a content safety classifier for a library of machine-generated",
   "fiction. Decide only whether the text contains NARROW ILLEGAL content:",
@@ -83,6 +94,11 @@ export function combineVerdicts(
 }
 
 export async function moderate(text: string): Promise<ModerationResult> {
+  if (!config.moderationEnabled) {
+    warnModerationDisabled();
+    return { ok: true };
+  }
+
   const results = await Promise.allSettled(
     config.moderationModels.map((entry) => classify(entry, text)),
   );

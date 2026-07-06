@@ -21,6 +21,17 @@ function numeric(name: string, fallback: number): number {
   return value;
 }
 
+/** Like `numeric`, but allows 0 — for knobs where zero means "off". */
+function nonNegative(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`Environment variable ${name} must be a non-negative number`);
+  }
+  return value;
+}
+
 /** Parse a comma-separated env list into trimmed, non-empty entries. */
 function list(name: string, fallback: string[]): string[] {
   const raw = process.env[name];
@@ -84,21 +95,36 @@ export const config = {
   devMode: process.env.DEV_MODE
     ? process.env.DEV_MODE === "true"
     : process.env.NODE_ENV !== "production",
+  // Safety gate; on by default. Set MODERATION_ENABLED=false ONLY as a
+  // temporary local unblock — the library is generate-once/store-forever, so
+  // any page crystallized while this is off is persisted UNMODERATED
+  // (docs/architecture.md §7).
+  moderationEnabled: process.env.MODERATION_ENABLED
+    ? process.env.MODERATION_ENABLED !== "false"
+    : true,
   // Back-compat single generation model; the pool below supersedes it.
   model: process.env.GENERATION_MODEL ?? DEFAULT_GENERATION_MODEL,
   // Multi-model generation rotation — the "different gravity wells" variety
   // lever (docs/generation.md). A page picks one at random; logged as `model`.
   generationModels: list("GENERATION_MODELS", [
     process.env.GENERATION_MODEL ?? DEFAULT_GENERATION_MODEL,
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "qwen/qwen3-next-80b-a3b-instruct:free",
+    // TEMPORARILY DISABLED (2026-07-02) — 429ing on the free tier. Nemotron is
+    // the only free model currently up. Uncomment to restore the rotation once
+    // free-tier availability recovers.
+    // "meta-llama/llama-3.3-70b-instruct:free",
+    // "qwen/qwen3-next-80b-a3b-instruct:free",
   ]),
   // Moderation pool (free models, mixed deterministic/non) and gate policy
   // (docs/architecture.md §7).
   moderationModels: parseModerationModels("MODERATION_MODELS", [
-    "meta-llama/llama-3.3-70b-instruct:free@0",
-    "google/gemma-4-31b-it:free@0.7",
-    "qwen/qwen3-next-80b-a3b-instruct:free@0",
+    // TEMPORARILY the whole free moderation pool was 429ing (2026-07-02), which
+    // is why moderation is also off via MODERATION_ENABLED=false. Nemotron is
+    // the only free model up, so it's the lone active entry for when moderation
+    // is switched back on. Uncomment the originals once availability recovers.
+    "nvidia/nemotron-3-super-120b-a12b:free@0",
+    // "meta-llama/llama-3.3-70b-instruct:free@0",
+    // "google/gemma-4-31b-it:free@0.7",
+    // "qwen/qwen3-next-80b-a3b-instruct:free@0",
   ]),
   moderationPolicy: moderationPolicy(),
   // Backstop only — the verdict is one token, but pool models may emit
@@ -108,6 +134,10 @@ export const config = {
   // Temperature starts coherent (the library drifts stranger over geological
   // time); Phase 9 retunes it. It is logged per page as provenance.
   temperature: numeric("GENERATION_TEMPERATURE", 0.9),
+  // Per-page temperature jitter: the actual temperature is the base ± a uniform
+  // draw up to this magnitude, clamped to a sane range. A model-agnostic variety
+  // lever that works even when generation is pinned to a single model. 0 = off.
+  temperatureJitter: nonNegative("GENERATION_TEMPERATURE_JITTER", 0.2),
   // Page-size constraint (docs/generation.md). pageMaxWords is the real size
   // control, stated in the prompt; maxTokens is only a cost backstop and is
   // deliberately generous — the :free nemotron is a reasoning model whose

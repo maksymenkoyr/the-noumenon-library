@@ -186,10 +186,10 @@ Everything above turns that single hardcoded call into the system described in [
 | Decision               | Resolution                                                                                  |
 | ---------------------- | ------------------------------------------------------------------------------------------- |
 | Generation prompt base | Established — see [Generation](./generation.md)                                             |
-| Entropy levers         | `"you do not know what you are"` (verbatim) + temperature + **free-model rotation** (`GENERATION_MODELS`); **seed word removed** and the **address is not injected** — the page is told neither what nor where it is |
-| Prompt variant         | Base-only (`base-v1`, the `written` prompt) for now; registry ready for `imagined`/mutations |
-| Generation temperature | Default 0.9 (coherent start; library ages stranger over time); env-tunable, retuned in Phase 9 |
-| Generation models      | Free-model pool, picked at random per page (revives the "gravity wells" variety lever) |
+| Entropy levers         | Transcriber framing + random **form/register** (`GENERATION_FORMS`) + **per-page temperature jitter** + model rotation; **address is not injected**. The removed seed word returned as the bounded form/register lever (logged in `seed_word`). Reframed from `"you do not know what you are"`, which invited "I am a page" self-narration |
+| Prompt variant         | `base-v2` (transcriber framing + injected form); registry ready for more mutations |
+| Generation temperature | Base 0.9, jittered ±`GENERATION_TEMPERATURE_JITTER` (default 0.2) per page; retuned in Phase 9 |
+| Generation models      | Free-model pool picked at random per page — **temporarily pinned to `nemotron:free`** while the others 429 (docs/generation.md) |
 | Navigation model       | Wandering-only (random / next / typed address); no semantic search                          |
 | Address topology       | Human-scaled Borges coordinates: `gallery/wall/shelf/volume/page` ([§5](./architecture.md)) |
 | Gallery token format   | Lowercase `[a-z0-9-]`, 1–12 chars, hyphen never first/last; lowercasing is the only normalization transform |
@@ -217,6 +217,29 @@ Everything above turns that single hardcoded call into the system described in [
 - **Moderation policy** — default `any-fail` (safety-first) may over-block during free-model experimentation, creating permanent dark shelves; the pool/policy is env-tunable while it's being A/B'd
 - **Prompt variation** — wake the dormant lever (e.g. `imagined` sibling, structural mutations) once the base texture is feel-tested (Phase 9)
 - **Streaming exposure** — live-stream-then-moderate vs. moderate-then-reveal ([§4](./architecture.md))
+
+---
+
+## Backlog — unscheduled features
+
+Concrete features to build eventually; smaller than a phase, not yet slotted. Captured so they're not lost.
+
+### Page "like" / resonance mark
+
+Let a visitor mark a page that gave them a pause — the exact signal the [success bar](./experience.md) chases.
+
+- **Model:** no accounts, so it's an **aggregate** signal (a like count per address), not per-person. Throttle by IP-hash to blunt trivial gaming; decide whether the count is public on the leaf or a private research signal.
+- **Where it hooks in:** the reserved `engagement` table ([Architecture §8](./architecture.md)) — add a reaction/like signal alongside `dwell_ms`/`arrived_via`. Cross-referenced with generation provenance (now including the `form`/register), this becomes direct data on *what makes a page worth pausing on*.
+- **UI:** a subtle control on the leaf, in keeping with the quiet aesthetic.
+- **Open:** GDPR posture (aggregate / IP-hashed, no identifiers — see [Legal](./legal.md)); public count vs. private; abuse throttling.
+
+### History navigation (back / forward through your trail)
+
+Make the wander legible as a **path**: explicit "← back / forward →" through the addresses *this visitor* has walked — distinct from **next →**, which is the library's own address-space successor, not personal history. The two are different axes and are currently easy to conflate.
+
+- **Where it hooks in:** navigation is `random / next / typed` today ([`app/[[...address]]/nav.tsx`](../app/[[...address]]/nav.tsx)), via full-page loads (plain anchors, no client history stack). Back/forward needs a **per-visitor trail** the server doesn't keep — hold it client-side (the browser History API and/or `sessionStorage`).
+- **UX:** clarify the distinction in the chrome so "next" (adjacent leaf) and "back/forward" (your own steps) never read as the same control. Browser back already works for full-page nav; an explicit in-app control makes "you are wandering a path" felt.
+- **Open:** whether the trail persists across sessions; how it interacts with `random` (each random is a new branch); surfacing "first visitor to this address" events ([Experience](./experience.md)) along the trail.
 
 ---
 

@@ -1,0 +1,71 @@
+
+> the-noumenon-ibrary@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.7 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.0.5:3000
+- Environments: .env.local
+✓ Ready in 367ms
+
+(node:1218) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ GET /inn4/2/1/22/10 200 in 1238ms (next.js: 509ms, application-code: 729ms)
+ GET /l/4/1/26/293 200 in 202ms (next.js: 4ms, application-code: 197ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.90 form="a horoscope"
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.94 form="a field guide entry"
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.80 form="marginalia scrawled in an older book"
+ GET /inn4/2/1/22/10 200 in 316ms (next.js: 10ms, application-code: 306ms)
+[noumenon] ⚠ MODERATION DISABLED — storing pages unmoderated (MODERATION_ENABLED=false)
+ GET /variety64963/1/2/3/4 200 in 8.4s (next.js: 512ms, application-code: 7.9s)
+ GET /variety64961/1/2/3/4 200 in 9.8s (next.js: 510ms, application-code: 9.3s)
+ GET / 307 in 69ms (next.js: 8ms, application-code: 61ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.82 form="a recipe"
+ GET /variety64962/1/2/3/4 200 in 14.1s (next.js: 510ms, application-code: 13.6s)
+ GET /j/2/5/22/125 200 in 11.4s (next.js: 1907µs, application-code: 11.4s)
+ GET / 307 in 53ms (next.js: 9ms, application-code: 43ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.91 form="a telegram"
+ GET /da2wwigg/4/4/16/275 200 in 21.6s (next.js: 1930µs, application-code: 21.6s)
+ GET /da2wwigg/4/4/16/275 200 in 555ms (next.js: 31ms, application-code: 524ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=1.10 form="a court testimony"
+ GET /da2wwigg/4/4/16/276 200 in 8.3s (next.js: 12ms, application-code: 8.3s)
+ GET / 307 in 57ms (next.js: 12ms, application-code: 45ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=1.05 form="an incantation"
+ GET /iejwha/3/1/19/20 200 in 12.5s (next.js: 1367µs, application-code: 12.5s)
+ GET / 307 in 61ms (next.js: 16ms, application-code: 45ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=1.05 form="a museum placard"
+ GET /i0cc/2/5/26/273 200 in 9.6s (next.js: 1414µs, application-code: 9.6s)
+ GET / 307 in 65ms (next.js: 18ms, application-code: 47ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=1.06 form="a scientific abstract"
+ GET /b5qh/3/2/10/271 200 in 24.0s (next.js: 4ms, application-code: 23.9s)
+ GET / 307 in 101ms (next.js: 31ms, application-code: 70ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.90 form="a field guide entry"
+ GET /9fbqhse/1/2/29/291 200 in 30.1s (next.js: 1598µs, application-code: 30.1s)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=1.09 form="a saint's life"
+ GET /9fbqhse/1/2/29/292 200 in 1378ms (next.js: 17ms, application-code: 1361ms)
+ GET / 307 in 64ms (next.js: 21ms, application-code: 43ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.91 form="a weather report"
+ GET /yc05xt50d3j/2/5/15/387 200 in 14.9s (next.js: 1408µs, application-code: 14.9s)
+ GET / 307 in 57ms (next.js: 13ms, application-code: 44ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.91 form="a ship's log"
+ GET /p2dn353/3/4/14/238 200 in 18.3s (next.js: 1979µs, application-code: 18.3s)
+ GET / 307 in 88ms (next.js: 37ms, application-code: 51ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.91 form="a dream written down on waking"
+ GET /39-997/4/5/21/139 200 in 12.5s (next.js: 1239µs, application-code: 12.5s)
+ GET / 307 in 105ms (next.js: 20ms, application-code: 85ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.94 form="a recipe"
+ GET /f9nvk/3/3/13/344 200 in 32.6s (next.js: 9ms, application-code: 32.5s)
+ GET / 307 in 79ms (next.js: 16ms, application-code: 63ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.81 form="an incantation"
+ GET /nuamrkkzf/4/3/21/149 200 in 8.8s (next.js: 1443µs, application-code: 8.8s)
+ GET / 307 in 61ms (next.js: 15ms, application-code: 47ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.77 form="an epitaph"
+ GET /693zo/2/5/21/57 200 in 17.6s (next.js: 1658µs, application-code: 17.6s)
+ GET /3lf5sbseup/2/3/14/155 200 in 4.3s (next.js: 71ms, application-code: 4.2s)
