@@ -18,3 +18,29 @@ CREATE TABLE IF NOT EXISTS pages (
 -- Dedup lookup; content_hash is deliberately NOT unique (near-duplicates
 -- are allowed), we only check exact collisions before commit.
 CREATE INDEX IF NOT EXISTS pages_content_hash_idx ON pages (content_hash);
+
+-- Economics & safety controls (docs/architecture.md §10, Phase 6). The counter
+-- store is Postgres (not edge KV): the DB is already provisioned and "fine at
+-- this scale" (§10), so no new infra is introduced.
+
+-- Per-visitor generation rate limit: one append-only row per admitted
+-- generation, keyed by a *hashed* IP (never the raw address — §12/legal.md).
+-- A sliding-window count over created_at enforces the limit; rows outside the
+-- window are pruned opportunistically, so nothing is retained long-term.
+CREATE TABLE IF NOT EXISTS rate_limit_hits (
+  id         BIGSERIAL PRIMARY KEY,
+  ip_hash    TEXT NOT NULL,           -- sha256(salt + ip); not reversible to the IP
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS rate_limit_hits_ip_time_idx
+  ON rate_limit_hits (ip_hash, created_at);
+
+-- Monthly spend counter: one row per calendar month (UTC), incremented per
+-- generation by token count and tokens×price. Checked before each generation;
+-- over the cap flips the library to explore-only (§10). Free (`:free`) models
+-- price at 0, so the counter tracks tokens while cost stays 0 until a paid tier.
+CREATE TABLE IF NOT EXISTS monthly_spend (
+  month    TEXT PRIMARY KEY,          -- 'YYYY-MM' (UTC)
+  tokens   BIGINT NOT NULL DEFAULT 0,
+  cost_usd NUMERIC NOT NULL DEFAULT 0
+);

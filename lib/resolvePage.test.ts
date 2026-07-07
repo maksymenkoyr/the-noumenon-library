@@ -7,6 +7,9 @@ vi.hoisted(() => {
   process.env.STALE_RESERVATION_SECONDS = "2";
   process.env.GENERATION_WAIT_SECONDS = "5";
   process.env.WAIT_POLL_INTERVAL_MS = "50";
+  // A small rate limit so the admission tests can cross it cheaply. Spend cap
+  // stays at its default (10) — those tests seed the counter directly.
+  process.env.RATE_LIMIT_PER_MINUTE = "3";
 });
 
 // Mock the generation pipeline (LLM + moderation + dedup); resolvePage owns
@@ -21,6 +24,7 @@ vi.mock("./pipeline", () => ({
         temperature: 0.9,
         prompt_variant: "base-v1",
       },
+      usage: { tokens: 100, costUsd: 0 },
     };
   }),
 }));
@@ -37,9 +41,12 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await query("TRUNCATE pages");
+  await query("TRUNCATE pages, rate_limit_hits, monthly_spend");
   generateMock.mockClear();
 });
+
+/** The current UTC month key, matching lib/economics.ts currentMonth(). */
+const currentMonth = new Date().toISOString().slice(0, 7);
 
 afterAll(async () => {
   await closePool();
@@ -113,5 +120,50 @@ describe("resolvePage lifecycle", () => {
     expect(page.status).toBe("taken_down");
     expect(page.text).toMatch(/removed from the library/i);
     expect(generateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolvePage admission control (§10)", () => {
+  it("records spend after a successful generation", async () => {
+    await resolvePage("a/1/1/1/1");
+    const rows = await query<{ tokens: string; cost_usd: string }>(
+      "SELECT tokens, cost_usd FROM monthly_spend WHERE month = $1",
+      [currentMonth],
+    );
+    expect(Number(rows[0]?.tokens)).toBe(100);
+  });
+
+  it("flips to explore-only past the monthly spend cap, without crystallizing", async () => {
+    // Seed the counter at the default cap (10) so the next generation is refused.
+    await query(
+      "INSERT INTO monthly_spend (month, tokens, cost_usd) VALUES ($1, 0, 10)",
+      [currentMonth],
+    );
+    const page = await resolvePage("b/1/1/1/1");
+    expect(page.status).toBe("explore");
+    expect(page.text).toMatch(/still dark/i);
+    expect(generateMock).not.toHaveBeenCalled();
+    // Not crystallized: a later visit (after reset) can still generate it.
+    expect(await getPage("b/1/1/1/1")).toBeNull();
+  });
+
+  it("rate-limits a visitor past the per-window generation limit", async () => {
+    const ctx = { clientIp: "203.0.113.7" };
+    // Limit is 3 (hoisted). First three distinct addresses generate…
+    for (const addr of ["c/1/1/1/1", "c/1/1/1/2", "c/1/1/1/3"]) {
+      expect((await resolvePage(addr, ctx)).status).toBe("ok");
+    }
+    // …the fourth is refused and leaves no row.
+    const fourth = await resolvePage("c/1/1/1/4", ctx);
+    expect(fourth.status).toBe("explore");
+    expect(await getPage("c/1/1/1/4")).toBeNull();
+    expect(generateMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not rate-limit when no client IP is supplied", async () => {
+    for (const addr of ["d/1/1/1/1", "d/1/1/1/2", "d/1/1/1/3", "d/1/1/1/4"]) {
+      expect((await resolvePage(addr)).status).toBe("ok");
+    }
+    expect(generateMock).toHaveBeenCalledTimes(4);
   });
 });

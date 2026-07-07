@@ -1,3 +1,9 @@
+import {
+  checkAdmission,
+  noteGeneration,
+  recordSpend,
+  type AdmissionContext,
+} from "./economics";
 import { generatePipeline } from "./pipeline";
 import {
   commitPage,
@@ -7,21 +13,26 @@ import {
   reservePage,
   waitForPage,
   type PageRow,
-  type PageStatus,
 } from "./store";
 
 /**
- * What a resolved address renders as. `text` is the page content for `ok`, or
- * the placeholder copy for `taken_down`. `generating` never escapes —
- * resolvePage waits for a final state.
+ * What a resolved address renders as. `ok`/`taken_down` mirror the stored row;
+ * `explore` is a render-only state (no row persisted) — a generation/moderation
+ * failure, or admission control refusing generation (spend cap / rate limit,
+ * §10). `text` is the page content or the relevant placeholder copy.
  */
+export type ResolvedStatus = "ok" | "taken_down" | "explore";
+
 export interface ResolvedPage {
-  status: PageStatus;
+  status: ResolvedStatus;
   text: string;
 }
 
 const TAKEN_DOWN_PLACEHOLDER =
   "This leaf has been removed from the library.";
+
+const EXPLORE_ONLY_PLACEHOLDER =
+  "This corner of the library is still dark — wander elsewhere and return later.";
 
 /**
  * Resolve the page at a canonical address — the heart of the system
@@ -32,40 +43,64 @@ const TAKEN_DOWN_PLACEHOLDER =
  * Callable from both a server component and a route handler.
  *
  * @param address - canonical normalized address (lib/address.ts).
+ * @param ctx - request context for admission control (client IP for the rate
+ *   limit); defaults to empty for non-request callers (tests, scripts).
  */
-export async function resolvePage(address: string): Promise<ResolvedPage> {
+export async function resolvePage(
+  address: string,
+  ctx: AdmissionContext = {},
+): Promise<ResolvedPage> {
   const existing = await getPage(address);
   if (existing) {
     if (existing.status !== "generating") return resolved(existing);
-    return waitOrReclaim(address);
+    return waitOrReclaim(address, ctx);
   }
 
-  if (await reservePage(address)) return generateAndCommit(address);
+  if (await reservePage(address)) return generateAndCommit(address, ctx);
   // Lost the reservation race — another request owns generation.
-  return waitOrReclaim(address);
+  return waitOrReclaim(address, ctx);
 }
 
 /** Another request is (or was) generating: wait for it, reclaim if stale. */
-async function waitOrReclaim(address: string): Promise<ResolvedPage> {
+async function waitOrReclaim(
+  address: string,
+  ctx: AdmissionContext,
+): Promise<ResolvedPage> {
   if (await reclaimStaleReservation(address)) {
-    return generateAndCommit(address);
+    return generateAndCommit(address, ctx);
   }
   const row = await waitForPage(address);
   if (row && row.status !== "generating") return resolved(row);
   if (row === null) {
     // Winner released its reservation (failed generation) — take over.
-    if (await reservePage(address)) return generateAndCommit(address);
+    if (await reservePage(address)) return generateAndCommit(address, ctx);
   }
   if (await reclaimStaleReservation(address)) {
-    return generateAndCommit(address);
+    return generateAndCommit(address, ctx);
   }
   throw new Error(`Timed out waiting for generation of ${address}`);
 }
 
-async function generateAndCommit(address: string): Promise<ResolvedPage> {
+async function generateAndCommit(
+  address: string,
+  ctx: AdmissionContext,
+): Promise<ResolvedPage> {
+  // Admission control (§10, §2 step 4): gate the expensive path only. Over the
+  // spend cap or this visitor's rate limit → release the reservation so the
+  // address stays un-crystallized (it can generate after the cap resets) and
+  // render explore-only rather than a real page.
+  const admission = await checkAdmission(ctx);
+  if (!admission.ok) {
+    await releaseReservation(address);
+    return { status: "explore", text: EXPLORE_ONLY_PLACEHOLDER };
+  }
+  // Count this generation before running it, so failures still throttle crawlers.
+  await noteGeneration(ctx);
+
   try {
-    const { content, provenance } = await generatePipeline(address);
+    const { content, provenance, usage } = await generatePipeline(address);
     await commitPage(address, content, provenance);
+    await recordSpend(usage);
     return { status: "ok", text: content };
   } catch (error) {
     // Unwedge the address so the next visitor becomes the first visitor. Covers

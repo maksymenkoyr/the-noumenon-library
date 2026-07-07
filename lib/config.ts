@@ -69,6 +69,28 @@ function parseModerationModels(
   });
 }
 
+/**
+ * Parse a `modelId@usdPerMillionTokens` list into a price map for the spend
+ * counter (docs/architecture.md §10). `@` is the separator (model ids never
+ * contain it). A model absent from the map prices at 0 — correct for the free
+ * (`:free`) tier, where the cap is armed but inert until a paid model is added.
+ */
+function parseModelPrices(name: string): Record<string, number> {
+  const prices: Record<string, number> = {};
+  for (const entry of list(name, [])) {
+    const at = entry.lastIndexOf("@");
+    if (at === -1) {
+      throw new Error(`Invalid ${name} entry (expected model@usdPerMillion): ${entry}`);
+    }
+    const price = Number(entry.slice(at + 1));
+    if (!Number.isFinite(price) || price < 0) {
+      throw new Error(`Invalid price in ${name} entry: ${entry}`);
+    }
+    prices[entry.slice(0, at)] = price;
+  }
+  return prices;
+}
+
 const DEFAULT_GENERATION_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
 
 export type ModerationPolicy = "any-fail" | "majority" | "unanimous-fail";
@@ -151,4 +173,17 @@ export const config = {
   staleReservationSeconds: numeric("STALE_RESERVATION_SECONDS", 300),
   generationWaitSeconds: numeric("GENERATION_WAIT_SECONDS", 300),
   waitPollIntervalMs: numeric("WAIT_POLL_INTERVAL_MS", 750),
+  // Economics & safety controls (docs/architecture.md §10, Phase 6). Enforced at
+  // admission control in lib/economics.ts, backed by Postgres counters.
+  // Per-visitor generation rate limit (only generations count; cache hits don't).
+  rateLimitPerMinute: numeric("RATE_LIMIT_PER_MINUTE", 10),
+  rateLimitWindowSeconds: numeric("RATE_LIMIT_WINDOW_SECONDS", 60),
+  // Monthly spend cap (USD); over the cap flips the library to explore-only.
+  monthlySpendCapUsd: numeric("MONTHLY_SPEND_CAP_USD", 10),
+  // Optional salt for the stored IP hash so it can't be reversed via a rainbow
+  // table of the (small) address space. Empty = unsalted (still not the raw IP).
+  rateLimitSalt: process.env.RATE_LIMIT_SALT ?? "",
+  // Per-model price (USD per million tokens) for the spend counter. Free
+  // (`:free`) models are absent → price 0, so the cap is armed but inert now.
+  modelPrices: parseModelPrices("MODEL_PRICES"),
 };

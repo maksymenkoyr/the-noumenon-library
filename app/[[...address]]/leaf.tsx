@@ -46,8 +46,9 @@ const PLACEHOLDER_COPY = {
 
 /**
  * A leaf with no readable content: either taken down, or explore-only (the page
- * could not be crystallized right now — a generation/moderation failure today,
- * the spend cap in Phase 6). The explore variant offers the way onward.
+ * could not be crystallized right now — a generation/moderation failure, or
+ * admission control refusing generation past the spend cap / rate limit (§10).
+ * The explore variant offers the way onward.
  */
 export function PlaceholderLeaf({
   variant,

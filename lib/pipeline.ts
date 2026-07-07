@@ -1,3 +1,4 @@
+import type { GenerationUsage } from "./economics";
 import { chooseLevers, generatePage, type GenerationLevers } from "./generate";
 import { moderate } from "./moderate";
 import { monitor } from "./monitor";
@@ -17,6 +18,10 @@ import { contentExistsElsewhere, hashContent, type PageProvenance } from "./stor
 export interface PipelineResult {
   content: string;
   provenance: PageProvenance;
+  // Every LLM generation call in this pipeline, summed — the spend the page
+  // actually cost, including regeneration/dedup retries (§10). Moderation tokens
+  // are not counted (free models; the dominant cost is generation).
+  usage: GenerationUsage;
 }
 
 function provenanceFrom(levers: GenerationLevers): PageProvenance {
@@ -29,14 +34,23 @@ function provenanceFrom(levers: GenerationLevers): PageProvenance {
 }
 
 export async function generatePipeline(address: string): Promise<PipelineResult> {
+  // Accumulate the cost of every generation call, including retries below.
+  const usage: GenerationUsage = { tokens: 0, costUsd: 0 };
+  const run = async (l: GenerationLevers): Promise<string> => {
+    const result = await generatePage(l);
+    usage.tokens += result.usage.tokens;
+    usage.costUsd += result.usage.costUsd;
+    return result.text;
+  };
+
   // Track levers alongside content so provenance always matches what we commit.
   let levers = chooseLevers();
-  let content = await generatePage(levers);
+  let content = await run(levers);
 
   if (!(await moderate(content)).ok) {
     // Moderation fail → regenerate once with fresh levers (architecture §7).
     levers = chooseLevers();
-    content = await generatePage(levers);
+    content = await run(levers);
     if (!(await moderate(content)).ok) {
       // Two rejects in a row. We never store failing content, but we no longer
       // permanently dark-shelf the address — flag it and bail so resolvePage
@@ -53,12 +67,12 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   // duplicates are allowed by design — no dark-shelving for a mere collision).
   if (await contentExistsElsewhere(hashContent(content), address)) {
     const dedupLevers = chooseLevers();
-    const dedupContent = await generatePage(dedupLevers);
+    const dedupContent = await run(dedupLevers);
     if ((await moderate(dedupContent)).ok) {
       levers = dedupLevers;
       content = dedupContent;
     }
   }
 
-  return { content, provenance: provenanceFrom(levers) };
+  return { content, provenance: provenanceFrom(levers), usage };
 }

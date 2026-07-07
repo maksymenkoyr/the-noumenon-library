@@ -1,4 +1,5 @@
 import { config } from "./config";
+import type { GenerationUsage } from "./economics";
 import { devLog } from "./log";
 import { getOpenRouter } from "./openrouter";
 import {
@@ -53,8 +54,16 @@ export function chooseLevers(): GenerationLevers {
   };
 }
 
+/** A generated page plus what it cost — usage feeds the spend counter (§10). */
+export interface GenerationResult {
+  text: string;
+  usage: GenerationUsage;
+}
+
 /** Generate the text found on a page with the given levers. */
-export async function generatePage(levers: GenerationLevers): Promise<string> {
+export async function generatePage(
+  levers: GenerationLevers,
+): Promise<GenerationResult> {
   const prompt = buildPrompt(levers.promptVariant, {
     maxWords: config.pageMaxWords,
     form: levers.form,
@@ -67,5 +76,12 @@ export async function generatePage(levers: GenerationLevers): Promise<string> {
     messages: [{ role: "user", content: prompt }],
   });
 
-  return response.choices[0].message.content ?? "";
+  const tokens = response.usage?.total_tokens ?? 0;
+  const pricePerMillion = config.modelPrices[levers.model] ?? 0;
+  const costUsd = (tokens / 1_000_000) * pricePerMillion;
+
+  return {
+    text: response.choices[0].message.content ?? "",
+    usage: { tokens, costUsd },
+  };
 }

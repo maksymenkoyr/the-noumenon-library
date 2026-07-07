@@ -69,3 +69,19 @@ See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode de
 [noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.77 form="an epitaph"
  GET /693zo/2/5/21/57 200 in 17.6s (next.js: 1658µs, application-code: 17.6s)
  GET /3lf5sbseup/2/3/14/155 200 in 4.3s (next.js: 71ms, application-code: 4.2s)
+ GET / 307 in 242ms (next.js: 55ms, application-code: 187ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=1.02 form="a set of assembly instructions"
+ GET /i7s/2/4/5/50 200 in 2.2s (next.js: 1808µs, application-code: 2.2s)
+ GET / 307 in 61ms (next.js: 12ms, application-code: 48ms)
+[noumenon] generate model=nvidia/nemotron-3-super-120b-a12b:free temp=0.74 form="a customer complaint"
+ GET /9ctbq398iet4/4/2/29/191 200 in 2.3s (next.js: 1367µs, application-code: 2.3s)
+✓ Compiled in 301ms
+✓ Compiled in 13ms
+✓ Compiled in 13ms
+✓ Compiled in 149ms
+✓ Compiled in 16ms
+✓ Compiled in 22ms
+✓ Compiled in 286ms
+✓ Compiled in 37ms
+✓ Compiled in 220ms
+✓ Compiled in 61ms

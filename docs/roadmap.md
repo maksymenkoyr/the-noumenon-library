@@ -21,7 +21,7 @@ A phased build plan from the current prototype to a public, walkable library. Ph
 - `[x]` Moderation live: free-model pool + policy gate, flag-and-retry on double-fail (monitoring event, no dark-shelf), reactive takedown script (`lib/moderate.ts`)
 - `[x]` Dev mode (`DEV_MODE`) logs which model each call runs
 - `[x]` Reading experience live: fixed-size leaf, typed/random/next navigation, Suspense-revealed first visit (shell streams instantly, leaf swaps in on crystallize), explore-only fallback (`app/[[...address]]/`) — **Phase 5**
-- `[]` No rate limit / spend cap yet (Phase 6)
+- `[x]` Economics & safety controls live: per-visitor rate limit + monthly spend cap, both Postgres-backed, enforced at admission control; over either → explore-only, no crystallization (`lib/economics.ts`) — **Phase 6, 🏁 M2 reached** (CDN edge-cache headers parked — see Phase 6)
 
 Everything above turns that single hardcoded call into the system described in [Architecture](./architecture.md); what remains is safety, economics, permanence, and the reading experience.
 
@@ -132,12 +132,14 @@ Everything above turns that single hardcoded call into the system described in [
 **Goal:** the library can't be bankrupted or crawled.
 **Depends on:** Phases 2–3.
 
-- `[ ]` Per-visitor rate limit (~10 new pages/min, IP-keyed; only generations count) ([§10](./architecture.md))
-- `[ ]` Monthly spend counter (`tokens × price`); cap → explore-only mode (no crystallization past the cap)
-- `[ ]` Decide counter store: Postgres vs. edge KV
-- `[ ]` CDN cache headers on committed pages so repeat reads skip the function ([§11](./architecture.md))
+- `[x]` Per-visitor rate limit (~10 new pages/min, IP-keyed; only generations count) ([§10](./architecture.md)) — `checkAdmission`/`noteGeneration` in `lib/economics.ts`, sliding window over `rate_limit_hits`; the IP is **hashed** before storage and rows outside the window are pruned (§12/[Legal](./legal.md)); counts every *admitted* generation incl. moderation failures, so crawlers on dead addresses still throttle. `RATE_LIMIT_PER_MINUTE` (default 10), `RATE_LIMIT_WINDOW_SECONDS` (60)
+- `[x]` Monthly spend counter (`tokens × price`); cap → explore-only mode (no crystallization past the cap) — `recordSpend` upserts `monthly_spend` (`YYYY-MM` UTC) with tokens summed across all generation calls in `lib/pipeline.ts` (retries included); `checkAdmission` gates on it. `MONTHLY_SPEND_CAP_USD` (default 10), `MODEL_PRICES` (`model@usdPerMillion`; free `:free` models absent → cost 0, so the cap is armed but inert until a paid tier)
+- `[x]` Decide counter store: Postgres vs. edge KV — **Postgres** (DB already provisioned, "fine at this scale" §10; no new infra). See Resolved decisions
+- `[~]` ~~CDN cache headers on committed pages so repeat reads skip the function~~ — **parked (user decision).** In Next 16 App Router a dynamic, DB-backed generation page is stamped `no-store`, and there is no per-render API to conditionally mark a committed page cacheable (Next `cdn-caching` guide). The done-when's "cache hits still served" is already met by the **store** (a revisit is one indexed DB read, no LLM). True edge `s-maxage` is deferred to Vercel deploy or a `cacheComponents`/`use cache` pass ([§11](./architecture.md))
 
-**Done when:** generation halts cleanly at the cap with cache hits still served, and a crawler can't exceed the rate limit. **🏁 M2 — safe & sustainable.**
+Admission control sits in `resolvePage`'s `generateAndCommit` — the single choke point after the store lookup, before the LLM call (§2 step 4). Over the cap or the rate limit → the reservation is **released** (address stays un-crystallized, so it generates after reset) and a render-only `explore` status renders the existing explore-only leaf. Cache hits render synchronously in `page.tsx` and never reach admission control, so revisits stay free.
+
+**Done when:** generation halts cleanly at the cap with cache hits still served, and a crawler can't exceed the rate limit. **🏁 M2 — safe & sustainable. ✅ Reached** (CDN edge-header optimization parked; store-based cache hits satisfy the bar).
 
 ---
 
@@ -203,6 +205,8 @@ Everything above turns that single hardcoded call into the system described in [
 | Model tier             | Free models only for now (no spend), both generation and moderation                         |
 | Moderation method      | Pool of free LLMs (mixed deterministic/non) → PASS/FAIL combined by policy (default `any-fail`); narrow illegal-content only; undetermined → retry, never store unmoderated |
 | Reactive takedown      | `npm run takedown -- <address>` script (no admin HTTP endpoint — would be an abuse vector); intake UI deferred to Phase 9 |
+| Rate-limit / spend-cap store | **Postgres counters** (`rate_limit_hits`, `monthly_spend`) — DB already provisioned, "fine at this scale" (§10); edge KV not adopted. IP is hashed + pruned, never stored raw (§12) |
+| CDN edge caching       | **Parked** — Next 16 App Router can't conditionally set `Cache-Control` per render on a dynamic generation page; store-based cache hits already serve revisits without generating. Revisit at Vercel deploy / via `cacheComponents` ([§11](./architecture.md)) |
 | Dev mode               | `DEV_MODE` env (auto-on outside production) → console-logs which model each call runs        |
 | License                | AGPL v3                                                                                     |
 | Funding model          | Public donation fuel tank; no subscription (system parked)                                  |

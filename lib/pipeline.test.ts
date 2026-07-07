@@ -31,6 +31,9 @@ const moderateMock = vi.mocked(moderate);
 const monitorMock = vi.mocked(monitor);
 const ADDR = "pipe/1/1/1/1";
 
+/** generatePage now returns text + usage; 100 tokens per call for accounting. */
+const gen = (text: string) => ({ text, usage: { tokens: 100, costUsd: 0 } });
+
 beforeAll(async () => {
   await query(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
 });
@@ -57,7 +60,7 @@ async function seedExistingPage(address: string, content: string) {
 
 describe("generatePipeline", () => {
   it("returns ok content with fully-populated provenance", async () => {
-    generateMock.mockResolvedValue("a unique page");
+    generateMock.mockResolvedValue(gen("a unique page"));
     const result = await generatePipeline(ADDR);
 
     expect(result.content).toBe("a unique page");
@@ -71,8 +74,8 @@ describe("generatePipeline", () => {
 
   it("regenerates once when moderation fails, then passes", async () => {
     generateMock
-      .mockResolvedValueOnce("flagged content")
-      .mockResolvedValueOnce("clean content");
+      .mockResolvedValueOnce(gen("flagged content"))
+      .mockResolvedValueOnce(gen("clean content"));
     moderateMock
       .mockResolvedValueOnce({ ok: false }) // first attempt fails
       .mockResolvedValueOnce({ ok: true }); // regenerated attempt passes
@@ -81,12 +84,14 @@ describe("generatePipeline", () => {
 
     expect(result.content).toBe("clean content");
     expect(generateMock).toHaveBeenCalledTimes(2);
+    // Usage is summed across every generation call (both attempts here).
+    expect(result.usage.tokens).toBe(200);
     // A single reject that recovers on regen is normal — no monitor event.
     expect(monitorMock).not.toHaveBeenCalled();
   });
 
   it("throws and flags a persistent reject (no dark-shelf) when moderation fails twice", async () => {
-    generateMock.mockResolvedValue("flagged content");
+    generateMock.mockResolvedValue(gen("flagged content"));
     moderateMock.mockResolvedValue({ ok: false });
 
     await expect(generatePipeline(ADDR)).rejects.toThrow(/moderation rejected/i);
@@ -102,8 +107,8 @@ describe("generatePipeline", () => {
   it("regenerates once (fresh sample) on an exact-hash collision", async () => {
     await seedExistingPage("other/1/1/1/1", "duplicated content");
     generateMock
-      .mockResolvedValueOnce("duplicated content") // collides
-      .mockResolvedValueOnce("a different page"); // fresh sample
+      .mockResolvedValueOnce(gen("duplicated content")) // collides
+      .mockResolvedValueOnce(gen("a different page")); // fresh sample
 
     const result = await generatePipeline(ADDR);
 
@@ -114,8 +119,8 @@ describe("generatePipeline", () => {
   it("keeps the original page if the dedup regen also fails moderation", async () => {
     await seedExistingPage("other/1/1/1/1", "duplicated content");
     generateMock
-      .mockResolvedValueOnce("duplicated content") // passes moderation, collides
-      .mockResolvedValueOnce("a different page"); // dedup regen, fails moderation
+      .mockResolvedValueOnce(gen("duplicated content")) // passes moderation, collides
+      .mockResolvedValueOnce(gen("a different page")); // dedup regen, fails moderation
     moderateMock
       .mockResolvedValueOnce({ ok: true }) // original passes
       .mockResolvedValueOnce({ ok: false }); // dedup regen fails
@@ -129,7 +134,7 @@ describe("generatePipeline", () => {
 
   it("does not regenerate when content is unique and passes", async () => {
     await seedExistingPage("other/1/1/1/1", "something else entirely");
-    generateMock.mockResolvedValue("a unique page");
+    generateMock.mockResolvedValue(gen("a unique page"));
 
     await generatePipeline(ADDR);
     expect(generateMock).toHaveBeenCalledTimes(1);
