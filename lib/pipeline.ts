@@ -56,7 +56,7 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
       // permanently dark-shelf the address — flag it and bail so resolvePage
       // releases the reservation and a later visit retries (§7). A recurring
       // offender keeps firing this event for a human to investigate / take down.
-      monitor("moderation_persistent_reject", { address, rejects: 2 });
+      await monitor("moderation_persistent_reject", { address, rejects: 2 });
       throw new Error(`Moderation rejected ${address} twice`);
     }
   }

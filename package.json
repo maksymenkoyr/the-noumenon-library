@@ -9,9 +9,12 @@
     "lint": "eslint",
     "test": "vitest run",
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
-    "takedown": "node --env-file=.env.local scripts/takedown.mjs"
+    "takedown": "node --env-file=.env.local scripts/takedown.mjs",
+    "backup": "node --env-file-if-exists=.env.local scripts/backup.mjs",
+    "restore:verify": "node --env-file-if-exists=.env.local scripts/restore-verify.mjs"
   },
   "dependencies": {
+    "aws4fetch": "^1.0.20",
     "next": "16.2.7",
     "openai": "^6.42.0",
     "pg": "^8.21.0",

@@ -22,6 +22,7 @@ A phased build plan from the current prototype to a public, walkable library. Ph
 - `[x]` Dev mode (`DEV_MODE`) logs which model each call runs
 - `[x]` Reading experience live: fixed-size leaf, typed/random/next navigation, Suspense-revealed first visit (shell streams instantly, leaf swaps in on crystallize), explore-only fallback (`app/[[...address]]/`) — **Phase 5**
 - `[x]` Economics & safety controls live: per-visitor rate limit + monthly spend cap, both Postgres-backed, enforced at admission control; over either → explore-only, no crystallization (`lib/economics.ts`) — **Phase 6, 🏁 M2 reached** (CDN edge-cache headers parked — see Phase 6)
+- `[x]` Permanence & ops live: nightly off-provider `pg_dump` → Cloudflare R2 with an automated test-restore, and webhook alerting on generation/moderation/DB failures (`scripts/backup.mjs`, `scripts/restore-verify.mjs`, `.github/workflows/backup.yml`, `lib/monitor.ts`) — **Phase 7** (activation needs R2 secrets wired; see [Operations](./operations.md))
 
 Everything above turns that single hardcoded call into the system described in [Architecture](./architecture.md); what remains is safety, economics, permanence, and the reading experience.
 
@@ -148,11 +149,11 @@ Admission control sits in `resolvePage`'s `generateAndCommit` — the single cho
 **Goal:** the precious store cannot be lost.
 **Depends on:** Phase 2.
 
-- `[ ]` Nightly `pg_dump` to off-provider object storage (beyond Neon's own PITR) ([§9](./architecture.md))
-- `[ ]` Periodic automated **test-restore** (an unrestorable backup is not a backup)
-- `[ ]` Basic error logging/alerting on generation, moderation, and DB failures
+- `[x]` Nightly `pg_dump` to off-provider object storage (beyond Neon's own PITR) ([§9](./architecture.md)) — `scripts/backup.mjs` dumps the **unpooled** connection (`-Fc`) and uploads to **Cloudflare R2** (S3-compatible, via `aws4fetch`); scheduled 03:00 UTC by `.github/workflows/backup.yml`
+- `[x]` Periodic automated **test-restore** (an unrestorable backup is not a backup) — `scripts/restore-verify.mjs` restores the fresh dump into a throwaway `postgres:17` service container and asserts page count matches source + every committed page keeps its `content_hash`; runs in the same nightly job
+- `[x]` Basic error logging/alerting on generation, moderation, and DB failures — `lib/monitor.ts` now also pushes to an env-gated Discord/Slack webhook (`MONITOR_WEBHOOK_URL`); events `db_query_failed` (`lib/db.ts`), `generation_failed` (`lib/resolvePage.ts`), `moderation_persistent_reject` (`lib/pipeline.ts`); backup-job failure pings the same webhook. Runbook: [Operations](./operations.md)
 
-**Done when:** a verified, off-provider, restorable nightly backup exists and is monitored.
+**Done when:** a verified, off-provider, restorable nightly backup exists and is monitored. **✅ Code complete** — the round-trip (dump → restore → verify) is proven locally; full activation needs the R2 bucket + repository secrets wired and the first scheduled run green ([Operations](./operations.md)).
 
 ---
 
@@ -207,6 +208,9 @@ Admission control sits in `resolvePage`'s `generateAndCommit` — the single cho
 | Reactive takedown      | `npm run takedown -- <address>` script (no admin HTTP endpoint — would be an abuse vector); intake UI deferred to Phase 9 |
 | Rate-limit / spend-cap store | **Postgres counters** (`rate_limit_hits`, `monthly_spend`) — DB already provisioned, "fine at this scale" (§10); edge KV not adopted. IP is hashed + pruned, never stored raw (§12) |
 | CDN edge caching       | **Parked** — Next 16 App Router can't conditionally set `Cache-Control` per render on a dynamic generation page; store-based cache hits already serve revisits without generating. Revisit at Vercel deploy / via `cacheComponents` ([§11](./architecture.md)) |
+| Off-provider backups   | **Cloudflare R2** (S3-compatible, zero egress, independent of Neon's AWS); nightly `pg_dump -Fc` of the unpooled connection via `aws4fetch`. See [Operations](./operations.md) |
+| Backup scheduler       | **GitHub Actions** cron (free, off-provider, holds secrets, and runs the test-restore in a `postgres:17` service container in the same job) — chosen over Vercel Cron (can't run the `pg_dump` binary / large output) |
+| Alerting               | Env-gated **Discord/Slack webhook** (`MONITOR_WEBHOOK_URL`) on top of structured `monitor()` JSON logs; best-effort, never blocks a request. Sentry deferred |
 | Dev mode               | `DEV_MODE` env (auto-on outside production) → console-logs which model each call runs        |
 | License                | AGPL v3                                                                                     |
 | Funding model          | Public donation fuel tank; no subscription (system parked)                                  |

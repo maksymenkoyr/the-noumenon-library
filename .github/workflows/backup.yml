@@ -1,0 +1,62 @@
+name: Nightly backup
+
+# Off-provider permanence (docs/architecture.md §9, docs/operations.md): each
+# night, dump the store to Cloudflare R2 and immediately test-restore the dump
+# into a throwaway Postgres — an unrestorable backup is not a backup.
+#
+# Requires repository secrets: DATABASE_URL_UNPOOLED, R2_ACCOUNT_ID,
+# R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, and optionally
+# MONITOR_WEBHOOK_URL (to be pinged if the job fails).
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC nightly
+  workflow_dispatch: {} # allow a manual run from the Actions tab
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    services:
+      # Throwaway target for the test-restore. Match Neon's major version so
+      # pg_restore doesn't reject the dump on a version mismatch.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: verify
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      MONITOR_WEBHOOK_URL: ${{ secrets.MONITOR_WEBHOOK_URL }}
+      TARGET_DATABASE_URL: postgres://postgres:postgres@localhost:5432/verify
+      BACKUP_DIR: ${{ runner.temp }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Postgres 17 client (match Neon's server major)
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+      - run: npm ci
+      - name: Create + upload backup
+        id: backup
+        run: npm run backup
+      - name: Test-restore + verify
+        run: npm run restore:verify -- "${{ steps.backup.outputs.dumpfile }}" "${{ steps.backup.outputs.pages }}"
+      - name: Alert on failure
+        if: failure() && env.MONITOR_WEBHOOK_URL != ''
+        run: |
+          MSG="⚠ Nightly backup failed: ${{ github.repository }} run ${{ github.run_id }}"
+          curl -fsSL -X POST -H 'content-type: application/json' \
+            -d "{\"content\":\"$MSG\",\"text\":\"$MSG\"}" "$MONITOR_WEBHOOK_URL" || true

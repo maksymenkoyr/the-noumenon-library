@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { config } from "./config";
+import { monitor } from "./monitor";
 
 /**
  * Shared Postgres pool. DATABASE_URL is the only coupling to the provider:
@@ -26,8 +27,17 @@ export async function query<Row extends object = Record<string, unknown>>(
   text: string,
   params: unknown[] = [],
 ): Promise<Row[]> {
-  const result = await getPool().query(text, params);
-  return result.rows as Row[];
+  try {
+    const result = await getPool().query(text, params);
+    return result.rows as Row[];
+  } catch (error) {
+    // The store is the library's only source of truth (§9) — surface DB failures
+    // as a structured, alertable event. Re-throw so callers behave unchanged.
+    await monitor("db_query_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 /** Close the shared pool (tests and scripts; never called per-request). */

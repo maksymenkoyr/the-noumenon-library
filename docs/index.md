@@ -20,6 +20,7 @@ Named after Kant's *noumenon*: the thing that exists beyond what can ever be ful
 | [Experience](./experience.md) | Navigation model, the AI reader layer, and the user journey |
 | [Economics](./economics.md) | API spend model, rate limits, and the fuel tank |
 | [Legal & Safety](./legal.md) | Moderation, copyright, GDPR/DSA, and takedown policy |
+| [Operations](./operations.md) | Backups, test-restore, and error logging/alerting runbook |
 | [Roadmap](./roadmap.md) | Open tickets, resolved decisions, and parked future ideas |
 
 ---

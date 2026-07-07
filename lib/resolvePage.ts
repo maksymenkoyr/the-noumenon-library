@@ -4,6 +4,7 @@ import {
   recordSpend,
   type AdmissionContext,
 } from "./economics";
+import { monitor } from "./monitor";
 import { generatePipeline } from "./pipeline";
 import {
   commitPage,
@@ -108,6 +109,11 @@ async function generateAndCommit(
     // and content that failed moderation twice (lib/pipeline throws) — all are
     // retried on a later visit rather than permanently blocked.
     await releaseReservation(address);
+    // Emit an observability event (§9 error logging/alerting) before rethrowing.
+    await monitor("generation_failed", {
+      address,
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw error;
   }
 }

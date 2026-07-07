@@ -186,4 +186,8 @@ export const config = {
   // Per-model price (USD per million tokens) for the spend counter. Free
   // (`:free`) models are absent → price 0, so the cap is armed but inert now.
   modelPrices: parseModelPrices("MODEL_PRICES"),
+  // Optional alert webhook (Discord/Slack-compatible) for monitor() events —
+  // generation/moderation/DB failures (docs/architecture.md §9, Phase 7). Unset
+  // → structured JSON logs only, no push. Never let alerting break a request.
+  monitorWebhookUrl: process.env.MONITOR_WEBHOOK_URL ?? "",
 };
