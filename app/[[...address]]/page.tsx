@@ -14,6 +14,7 @@ import { CrystallizingLeaf, Leaf, PlaceholderLeaf } from "./leaf";
 import { Nav } from "./nav";
 
 export const runtime = "nodejs";
+export const maxDuration = 60; // Hobby cap; generations run 8–32s
 
 export default async function Page({
   params,

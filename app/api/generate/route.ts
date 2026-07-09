@@ -4,6 +4,7 @@ import { getClientIp } from "@/lib/clientIp";
 import { resolvePage } from "@/lib/resolvePage";
 
 export const runtime = "nodejs";
+export const maxDuration = 60; // Hobby cap; generations run 8–32s
 
 export async function GET() {
   const address = formatAddress(randomAddress());

@@ -29,6 +29,9 @@ function warnModerationDisabled(): void {
   console.warn(
     "[noumenon] ⚠ MODERATION DISABLED — storing pages unmoderated (MODERATION_ENABLED=false)",
   );
+  // Audit trail (once per process): a knowingly-unmoderated deploy — the
+  // ALLOW_UNMODERATED escape in production, or the dev unblock — is never silent.
+  void monitor("moderation_disabled_in_production");
 }
 
 const MODERATION_PROMPT = [
@@ -101,12 +104,15 @@ export async function moderate(text: string): Promise<ModerationResult> {
     // reservation → the page renders explore-only instead of being committed
     // unmoderated. Outside production the disabled state is a local dev unblock
     // (loud one-time warning only). Enabling the pool for real is Phase 9.
-    if (config.isProduction) {
+    if (config.isProduction && !config.allowUnmoderated) {
       void monitor("moderation_disabled_in_production");
       throw new Error(
         "Moderation is disabled in production — refusing to store unmoderated content",
       );
     }
+    // Escape hatch (ALLOW_UNMODERATED) or non-production dev unblock: skip the
+    // gate. warnModerationDisabled() leaves a loud, once-per-process warning +
+    // audit event so a knowingly-unmoderated deploy is never silent in the logs.
     warnModerationDisabled();
     return { ok: true };
   }

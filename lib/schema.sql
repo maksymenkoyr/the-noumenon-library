@@ -44,3 +44,19 @@ CREATE TABLE IF NOT EXISTS monthly_spend (
   tokens   BIGINT NOT NULL DEFAULT 0,
   cost_usd NUMERIC NOT NULL DEFAULT 0
 );
+
+-- Private-access invite tokens (reusable links). Each row is a unique,
+-- unguessable token issued to one person (scripts/invite.mjs). Redeeming it
+-- (app/api/access) drops a signed session cookie in that browser and stamps
+-- redeemed_at/redeemed_ip with the most recent use; the link stays valid on any
+-- device, any number of times. The token is the PRIMARY KEY, so duplicates are
+-- impossible by construction. Not part of the public library — the gate
+-- (proxy.ts) is inert unless ACCESS_SIGNING_SECRET is set. See the private-share
+-- deploy notes.
+CREATE TABLE IF NOT EXISTS access_tokens (
+  token       TEXT PRIMARY KEY,        -- 128-bit random; PK => no duplicates
+  label       TEXT,                    -- who it was issued to (operator note)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  redeemed_at TIMESTAMPTZ,             -- most recent successful redemption
+  redeemed_ip TEXT                     -- best-effort, for the operator's record
+);

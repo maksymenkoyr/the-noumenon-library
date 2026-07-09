@@ -197,4 +197,13 @@ export const config = {
   // True only in a real production deploy — gates the fail-closed moderation
   // guard (lib/moderate.ts): never store unmoderated content in production.
   isProduction: process.env.NODE_ENV === "production",
+  // TEMPORARY private-share escape: when true, the production fail-closed
+  // moderation guard is deliberately relaxed so pages can crystallize while
+  // MODERATION_ENABLED=false. Must be UNSET before any genuinely public launch.
+  allowUnmoderated: process.env.ALLOW_UNMODERATED === "true",
+  // Private-access gate (proxy.ts + app/api/access, lib/access.ts). When set,
+  // the whole site is gated behind reusable invite links (scripts/invite.mjs)
+  // that redeem into an HMAC-signed session cookie. Unset (local
+  // dev, or an intentionally public deploy) => gate is inert, site is open.
+  accessSigningSecret: process.env.ACCESS_SIGNING_SECRET ?? "",
 };
