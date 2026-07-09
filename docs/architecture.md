@@ -45,12 +45,11 @@ Two HTTP entry points are planned:
 | Route | Method | Purpose | Status |
 |---|---|---|---|
 | `app/[[...address]]/page.tsx` | — | Renders a page for an address (server component) | 🟢 |
-| `app/api/reader/route.ts` | `POST` | AI-reader layer: interpret page, surface resonance, suggest next | ⚪ |
 | `app/api/generate/route.ts` | `GET` | Current prototype generator (no address, no store) | 🟢 (to be replaced) |
 
 **All business logic lives in `lib/`, not in components or route handlers.** The route handler and the server component are both thin adapters that call the same `resolvePage(address)` function. This is what makes the "extract to a standalone service" scaling path cheap — see [§13](#13-scaling-path).
 
-> **Why a shared lib instead of the page calling `/api/generate` over HTTP?** The current [`app/page.tsx`](../app/page.tsx) does `fetch("http://localhost:3000/api/generate")`. That hardcodes localhost (breaks on Vercel), pays a network round-trip to talk to itself, and forces request-time rendering. A server component should `await resolvePage(address)` directly. The API route stays only for non-React clients (the reader layer, future external callers).
+> **Why a shared lib instead of the page calling `/api/generate` over HTTP?** The current [`app/page.tsx`](../app/page.tsx) does `fetch("http://localhost:3000/api/generate")`. That hardcodes localhost (breaks on Vercel), pays a network round-trip to talk to itself, and forces request-time rendering. A server component should `await resolvePage(address)` directly. The API route stays only for non-React clients (future external callers).
 
 ---
 
@@ -203,6 +202,8 @@ The prompt text itself is owned by [generation.md](./generation.md); this doc on
 - **When it runs:** on **novel pages only**, after generation completes — never on cache hits.
 - **On fail:** regenerate **once** (a fresh sample). If the regeneration also fails, the pipeline emits a `moderation_persistent_reject` monitoring event ([`lib/monitor.ts`](../lib/monitor.ts)) and throws — `resolvePage` releases the reservation and the address is retried on a later visit. **There is no permanent dark-shelf:** we don't believe any address consistently yields illegal content, so rather than auto-blocking we surface the rare 2-reject case for a human to investigate and, if warranted, take down. (A dedup regeneration is also re-moderated before it can replace already-passed content.)
 - **Latency posture:** one parallel pool call per *new* page; zero on the hot (cache-hit) path. Verdicts are logged (console, verbose under `DEV_MODE`) for A/B comparison, not persisted.
+- **Pool sizing — deliberately *unlike* generation.** Generation runs a **long, diverse** model list because variety *is* the point (more gravity wells = more entropy/texture, docs/generation.md). Moderation is the opposite: a **short, curated** pool chosen for reliability, recall, and low latency (it gates the commit). Diversity buys nothing here, and a *long* `any-fail` pool actively hurts — every added model is another chance to wrongly `FAIL` benign-but-dark content, over-blocking it into a permanent dark shelf, against the "darkness is a feature" ethos. So keep the pool small; if it must grow, move `MODERATION_POLICY` off `any-fail` (e.g. `majority`) in step. The ideal endpoint is a purpose-built safety classifier behind the same `moderate()` interface, not more general chat models.
+- **Fail-closed in production (Phase 9):** `MODERATION_ENABLED=false` is a **local-dev-only** unblock. In production the disabled switch makes `moderate()` throw (and emit a `moderation_disabled_in_production` alert), so a misconfigured deploy degrades to explore-only instead of ever storing unmoderated content.
 
 > **Fallback option (⚪):** if the yes/no LLM proves unreliable or slow, a hosted moderation endpoint can be swapped in behind the same `moderate(text)` interface. The OpenAI moderation API is the obvious candidate but is deprioritized per your preference.
 
@@ -259,7 +260,7 @@ CREATE TABLE engagement (
   id          BIGSERIAL PRIMARY KEY,
   address     TEXT NOT NULL REFERENCES pages(address),
   dwell_ms    INTEGER,                 -- time on page
-  arrived_via TEXT,                    -- 'random' | 'next' | 'typed' | 'reader'
+  arrived_via TEXT,                    -- 'random' | 'next' | 'typed'
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
@@ -302,7 +303,7 @@ Both controls sit *after* the store lookup and *before* the LLM call (in `resolv
 - **Route handler caching (Next 16):** route handlers are **not cached by default** and run at request time — correct for our dynamic, store-backed generation. We deliberately do *not* `force-static` the generate path.
 - **CDN caching of crystallized pages:** because a committed page is immutable, the page route could send long-lived `Cache-Control`/`s-maxage` headers so Vercel's CDN serves repeat visitors without invoking a function at all — the main cost lever as the library grows. 🟡 **Parked (Phase 6).** In Next 16 App Router the address page is intrinsically dynamic (it reads Postgres and may run generation), so Next stamps it `no-store`, and there is no per-render API to conditionally mark only a committed page cacheable (see the bundled `cdn-caching` guide). Meanwhile "cache hits are free" already holds at the **store** layer — a revisit is one indexed DB read with no LLM call. True edge caching is deferred to Vercel deploy or a `cacheComponents`/`use cache` pass.
 - **Postgres connections:** serverless functions are many and short-lived, which exhausts raw Postgres connections. Use **Neon's serverless/HTTP driver or a pooled (PgBouncer) connection string**, not a long-lived TCP pool. 🟢 Implemented as a tiny `pg` pool (max 3) behind `DATABASE_URL` in `lib/db.ts` — point it at Neon's **pooled** connection string in production; swapping to the Neon HTTP driver later is confined to that one file.
-- **Environment variables (server-only):** `OPENROUTER_API_KEY` (🟢), `DATABASE_URL` (🟢, Neon pooled), `DEV_MODE` (model logging), generation levers (`GENERATION_MODELS`, `GENERATION_MODEL`, `GENERATION_TEMPERATURE`, `PAGE_MAX_WORDS`, `GENERATION_MAX_TOKENS`), moderation (`MODERATION_MODELS`, `MODERATION_POLICY`, `MODERATION_MAX_TOKENS`), concurrency tunables (`STALE_RESERVATION_SECONDS`, `GENERATION_WAIT_SECONDS`, `WAIT_POLL_INTERVAL_MS`), and economic thresholds (🟢 Phase 6: `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_WINDOW_SECONDS`, `MONTHLY_SPEND_CAP_USD`, `RATE_LIMIT_SALT`, `MODEL_PRICES`), plus `MONITOR_WEBHOOK_URL` (🟢 Phase 7 alerting). All centralized in `lib/config.ts`; none are `NEXT_PUBLIC_*`. The nightly backup job additionally uses `DATABASE_URL_UNPOOLED` and R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`) — set as CI secrets, not app env ([Operations](./operations.md)).
+- **Environment variables (server-only):** `OPENROUTER_API_KEY` (🟢), `DATABASE_URL` (🟢, Neon pooled), `DEV_MODE` (model logging), generation levers (`GENERATION_MODELS`, `GENERATION_MODEL`, `GENERATION_TEMPERATURE`, `PAGE_MAX_WORDS`, `GENERATION_MAX_TOKENS`), moderation (`MODERATION_MODELS`, `MODERATION_POLICY`, `MODERATION_MAX_TOKENS`), concurrency tunables (`STALE_RESERVATION_SECONDS`, `GENERATION_WAIT_SECONDS`, `WAIT_POLL_INTERVAL_MS`), and economic thresholds (🟢 Phase 6: `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_WINDOW_SECONDS`, `MONTHLY_SPEND_CAP_USD`, `RATE_LIMIT_SALT`, `MODEL_PRICES`), plus `MONITOR_WEBHOOK_URL` (🟢 Phase 7 alerting) and `REPORT_CONTACT_EMAIL` (🟢 Phase 9, shown on `/about`). All centralized in `lib/config.ts`; none are `NEXT_PUBLIC_*`. The nightly backup job additionally uses `DATABASE_URL_UNPOOLED` and R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`) — set as CI secrets, not app env ([Operations](./operations.md)).
 
 ---
 

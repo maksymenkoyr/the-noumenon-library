@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Geist, Geist_Mono, Lora } from "next/font/google";
 import "./globals.css";
 
@@ -35,7 +36,20 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${lora.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <footer className="mx-auto w-full max-w-2xl px-8 py-6 font-mono text-xs text-neutral-400">
+          <p>
+            Machine-generated fiction · non-commercial ·{" "}
+            <Link
+              href="/about"
+              className="underline underline-offset-2 hover:text-neutral-600 dark:hover:text-neutral-300"
+            >
+              about &amp; reporting
+            </Link>
+          </p>
+        </footer>
+      </body>
     </html>
   );
 }

@@ -23,6 +23,7 @@ A phased build plan from the current prototype to a public, walkable library. Ph
 - `[x]` Reading experience live: fixed-size leaf, typed/random/next navigation, Suspense-revealed first visit (shell streams instantly, leaf swaps in on crystallize), explore-only fallback (`app/[[...address]]/`) — **Phase 5**
 - `[x]` Economics & safety controls live: per-visitor rate limit + monthly spend cap, both Postgres-backed, enforced at admission control; over either → explore-only, no crystallization (`lib/economics.ts`) — **Phase 6, 🏁 M2 reached** (CDN edge-cache headers parked — see Phase 6)
 - `[x]` Permanence & ops live: nightly off-provider `pg_dump` → Cloudflare R2 with an automated test-restore, and webhook alerting on generation/moderation/DB failures (`scripts/backup.mjs`, `scripts/restore-verify.mjs`, `.github/workflows/backup.yml`, `lib/monitor.ts`) — **Phase 7** (activation needs R2 secrets wired; see [Operations](./operations.md))
+- `[~]` Launch hardening in progress: legal footer + `/about` (disclaimer, non-commercial, AGPL, GDPR/DSA, email report path), fail-closed moderation guard, and success-bar eval tooling (`app/about/`, `lib/moderate.ts`, `scripts/wander-sample.mjs`) — **Phase 9**. 🏁 M3 still gated on enabling moderation reliably + passing the success-bar eval
 
 Everything above turns that single hardcoded call into the system described in [Architecture](./architecture.md); what remains is safety, economics, permanence, and the reading experience.
 
@@ -34,7 +35,7 @@ Everything above turns that single hardcoded call into the system described in [
 | --------------------------- | ------------- | -------------------------------------------------------------------------------------------- |
 | **M1 — Walkable library**   | Phase 3       | You can wander by address; pages generate once and persist. Private use; moderation stubbed. |
 | **M2 — Safe & sustainable** | Phase 6       | Moderation, spend cap, and rate limits live. Safe to expose.                                 |
-| **M3 — Public launch**      | Phase 9       | Backups, legal, reader layer, success-bar passed.                                            |
+| **M3 — Public launch**      | Phase 9       | Backups, legal, success-bar passed.                                                          |
 
 ---
 
@@ -157,16 +158,11 @@ Admission control sits in `resolvePage`'s `generateAndCommit` — the single cho
 
 ---
 
-## Phase 8 — AI reader layer
+## Phase 8 — AI reader layer · ✂️ Dropped
 
-**Goal:** the AI-as-reader companion central to the premise ([Experience](./experience.md)). Independent of the launch-critical infra above — can move earlier if desired.
-**Depends on:** Phase 3 (pages must exist).
+**Out of scope.** The AI-as-reader companion (interpret a page, surface resonant lines, suggest where to walk next) has been **spun out to a separate project**. It doesn't belong here: the "suggest where to walk next" step is hollow (addresses are meaningless coordinates, so it could only flip next/random in poetic dress), and an AI narrating the pages cuts against the library's *you can only walk* ethos and risks flattening the strangeness the work is built on. Nothing was built. See [Parked future ideas → AI reader layer](#ai-reader-layer-separate-project).
 
-- `[ ]` `POST /api/reader`: interpret a page, surface resonant lines, suggest where to walk next — reads, does not generate the library
-- `[ ]` "Carried question" input the reader watches for resonance against
-- `[ ]` Reader UI alongside the page
-
-**Done when:** on a given page the reader produces a plausible interpretation, a surfaced line, and a next-step suggestion.
+The phase number is kept as a tombstone so later phases and links don't shift.
 
 ---
 
@@ -175,12 +171,12 @@ Admission control sits in `resolvePage`'s `generateAndCommit` — the single cho
 **Goal:** ready for the public.
 **Depends on:** Phases 4, 6, 7.
 
-- `[ ]` Legal: machine-generated-fiction disclaimer, non-commercial notice, copyright/abuse report mechanism wired to the takedown path ([Legal](./legal.md))
-- `[ ]` Confirm moderation is live (not stubbed) and DSA/GDPR posture documented
-- `[ ]` Success-bar test: a meaningful fraction of pages produce a pause across a 20-page wander ([Experience](./experience.md))
-- `[ ]` Tune model tier / temperature for the coherence-to-strangeness target zone ([Generation](./generation.md))
+- `[x]` Legal: machine-generated-fiction disclaimer, non-commercial notice, copyright/abuse report mechanism wired to the takedown path ([Legal](./legal.md)) — global footer disclaimer + `/about` (`app/about/page.tsx`: full disclaimer, non-commercial, AGPL v3 + source, GDPR/DSA posture, **email-only** report path via `REPORT_CONTACT_EMAIL`; report → operator runs `npm run takedown`)
+- `[~]` Confirm moderation is live (not stubbed) and DSA/GDPR posture documented — **posture documented** (`/about`, [Legal](./legal.md)) and a **fail-closed production guard** landed (`lib/moderate.ts` throws + alerts if moderation is off in prod, so a misconfigured deploy degrades to explore-only, never storing unmoderated). **Enabling the pool for real is deferred** — the free pool 429s; needs a reliable (future free+paid) setup. **M3 stays gated on this.**
+- `[~]` Success-bar test: a meaningful fraction of pages produce a pause across a 20-page wander ([Experience](./experience.md)) — **tooling shipped** (`npm run wander -- 20` → scorable Markdown sample via `scripts/wander-sample.mjs`); the eval itself is user-run.
+- `[~]` Tune model tier / temperature for the coherence-to-strangeness target zone ([Generation](./generation.md)) — **deferred**, iterative, depends on the success-bar eval; levers already env-tunable (`GENERATION_TEMPERATURE`, `GENERATION_TEMPERATURE_JITTER`, `GENERATION_MODELS`).
 
-**Done when:** the success bar is met and the library is safe, backed up, and legally covered. **🏁 M3 — public launch.**
+**Done when:** the success bar is met and the library is safe, backed up, and legally covered. **🏁 M3 — public launch.** ⏳ **Not yet reached** — the legal surface and fail-closed guard are in; M3 remains gated on **enabling moderation reliably** and **passing the success-bar eval + tuning**.
 
 ---
 
@@ -211,6 +207,9 @@ Admission control sits in `resolvePage`'s `generateAndCommit` — the single cho
 | Off-provider backups   | **Cloudflare R2** (S3-compatible, zero egress, independent of Neon's AWS); nightly `pg_dump -Fc` of the unpooled connection via `aws4fetch`. See [Operations](./operations.md) |
 | Backup scheduler       | **GitHub Actions** cron (free, off-provider, holds secrets, and runs the test-restore in a `postgres:17` service container in the same job) — chosen over Vercel Cron (can't run the `pg_dump` binary / large output) |
 | Alerting               | Env-gated **Discord/Slack webhook** (`MONITOR_WEBHOOK_URL`) on top of structured `monitor()` JSON logs; best-effort, never blocks a request. Sentry deferred |
+| Abuse/copyright report intake | **Email-only** (`REPORT_CONTACT_EMAIL`, shown on `/about`) — no in-app form/endpoint (no new spam surface); report → operator runs `npm run takedown`. The takedown stays a script, never an open route |
+| Moderation-off safety   | **Fail-closed in production** — `moderate()` throws + alerts if `MODERATION_ENABLED=false` in prod, so nothing unmoderated is ever stored; the disabled switch stays a local-dev-only unblock |
+| Model-pool diversity    | **Generation: long & diverse** (variety is entropy/texture); **moderation: short & curated** (reliability + recall + low latency). A long `any-fail` moderation pool over-blocks (false positives → permanent dark shelves); grow the pool only alongside a policy change (`majority`) |
 | Dev mode               | `DEV_MODE` env (auto-on outside production) → console-logs which model each call runs        |
 | License                | AGPL v3                                                                                     |
 | Funding model          | Public donation fuel tank; no subscription (system parked)                                  |
@@ -255,9 +254,13 @@ Make the wander legible as a **path**: explicit "← back / forward →" through
 
 Out of scope for the current version. Do not pull into active work without a separate design pass.
 
+### AI reader layer (separate project)
+
+An AI companion that sits *on top of* the library as a reader, not a generator — interpreting what a page might mean, surfacing a resonant line, and watching for resonance against a "carried question" the visitor brings. Was Phase 8; **spun out to a separate project.** It doesn't fit the Noumenon Library: the "where to walk next" suggestion has nothing honest to say (addresses carry no meaning and nothing is indexed by content, so it degrades to next-vs-random dressed in prose), and narrating the pages works against the *you can only walk* ethos — the pause is meant to happen in the human reader, unmediated, not be explained by a bot. Nothing was built.
+
 ### Algorithmic version
 
-PRNG + rich word pools, AI as guide/reader layer only. Preserves mathematical completeness (all possible strings) rather than experiential completeness.
+PRNG + rich word pools, AI as an optional guide only. Preserves mathematical completeness (all possible strings) rather than experiential completeness.
 
 ### Algorithm iteration series
 

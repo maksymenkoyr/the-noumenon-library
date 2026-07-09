@@ -1,5 +1,6 @@
 import { config, type ModerationModel, type ModerationPolicy } from "./config";
 import { devLog } from "./log";
+import { monitor } from "./monitor";
 import { getOpenRouter } from "./openrouter";
 
 /**
@@ -95,6 +96,17 @@ export function combineVerdicts(
 
 export async function moderate(text: string): Promise<ModerationResult> {
   if (!config.moderationEnabled) {
+    // Fail-closed in production: never store unmoderated content (architecture
+    // §7 invariant, docs/legal.md). Throwing makes resolvePage release the
+    // reservation → the page renders explore-only instead of being committed
+    // unmoderated. Outside production the disabled state is a local dev unblock
+    // (loud one-time warning only). Enabling the pool for real is Phase 9.
+    if (config.isProduction) {
+      void monitor("moderation_disabled_in_production");
+      throw new Error(
+        "Moderation is disabled in production — refusing to store unmoderated content",
+      );
+    }
     warnModerationDisabled();
     return { ok: true };
   }

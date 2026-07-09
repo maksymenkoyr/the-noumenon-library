@@ -190,4 +190,11 @@ export const config = {
   // generation/moderation/DB failures (docs/architecture.md §9, Phase 7). Unset
   // → structured JSON logs only, no push. Never let alerting break a request.
   monitorWebhookUrl: process.env.MONITOR_WEBHOOK_URL ?? "",
+  // Contact address for abuse/copyright reports, shown on /about (docs/legal.md,
+  // Phase 9). Email-only intake by design — the takedown stays a script, not an
+  // open endpoint. Unset → the about page says reporting is temporarily offline.
+  reportContactEmail: process.env.REPORT_CONTACT_EMAIL ?? "",
+  // True only in a real production deploy — gates the fail-closed moderation
+  // guard (lib/moderate.ts): never store unmoderated content in production.
+  isProduction: process.env.NODE_ENV === "production",
 };

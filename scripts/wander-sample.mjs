@@ -1,0 +1,80 @@
+// Success-bar eval harness (Phase 9, docs/experience.md "Success bar",
+// docs/generation.md "coherent but hollow"). Walks N random addresses through
+// the running app and writes a scorable Markdown sample for a manual read.
+//
+// This GENERATES real pages (each random address crystallizes and is stored) and
+// spends generation tokens — run it against a dev server, deliberately.
+//
+// Usage: npm run dev  (in another terminal), then:
+//        npm run wander -- 20
+//        BASE=https://example.com npm run wander -- 20
+import { writeFile } from "node:fs/promises";
+
+const count = Number(process.argv[2] ?? 20);
+if (!Number.isInteger(count) || count <= 0) {
+  console.error("Usage: npm run wander -- <count>   (positive integer)");
+  process.exit(1);
+}
+const base = (process.env.BASE ?? "http://localhost:3000").replace(/\/$/, "");
+
+/** Resolve one random address via the app's own generator endpoint. */
+async function walk() {
+  const res = await fetch(`${base}/api/generate`, {
+    headers: { accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`${base}/api/generate → ${res.status}`);
+  return res.json(); // { address, status, text }
+}
+
+const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+const outfile = `wander-${stamp}.md`;
+
+const lines = [
+  `# Wander sample — ${count} pages`,
+  "",
+  `Generated ${new Date().toISOString()} from ${base}`,
+  "",
+  "## How to score",
+  "",
+  "The bar (docs/experience.md): a **meaningful fraction** of a 20-page wander",
+  "should produce a *pause* — a page you find yourself reading again, not sure",
+  "why. Not every page; not most. The failure mode (docs/generation.md) is",
+  "**coherent but hollow**: readable, forgettable, empty.",
+  "",
+  "For each page below, mark `[pause]`, `[hollow]`, or `[ ]`. Tally at the end.",
+  "",
+  "---",
+  "",
+];
+
+for (let i = 1; i <= count; i++) {
+  process.stdout.write(`\rwalking ${i}/${count}…`);
+  try {
+    const { address, status, text } = await walk();
+    lines.push(
+      `### ${i}. \`${address}\`  — status: ${status}`,
+      "",
+      "score: `[ ]`  (pause / hollow / blank)",
+      "",
+      status === "ok" ? text : `_(${status} — no page)_`,
+      "",
+      "---",
+      "",
+    );
+  } catch (error) {
+    lines.push(`### ${i}. — error`, "", `\`${String(error)}\``, "", "---", "");
+  }
+}
+process.stdout.write("\n");
+
+lines.push(
+  "## Tally",
+  "",
+  "- pauses: __ / " + count,
+  "- hollow: __",
+  "- verdict (meaningful fraction paused?): __",
+  "",
+);
+
+await writeFile(outfile, lines.join("\n"), "utf8");
+console.log(`Wrote ${outfile}`);

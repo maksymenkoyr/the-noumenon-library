@@ -17,7 +17,7 @@ Named after Kant's *noumenon*: the thing that exists beyond what can ever be ful
 | [Concept](./concept.md) | What the library is, the core premise, and its philosophical grounding |
 | [Architecture](./architecture.md) | Technical design, data model, and tech stack |
 | [Generation](./generation.md) | Prompt engineering, entropy levers, and anti-patterns |
-| [Experience](./experience.md) | Navigation model, the AI reader layer, and the user journey |
+| [Experience](./experience.md) | Navigation model, the fixed-leaf reading experience, and the user journey |
 | [Economics](./economics.md) | API spend model, rate limits, and the fuel tank |
 | [Legal & Safety](./legal.md) | Moderation, copyright, GDPR/DSA, and takedown policy |
 | [Operations](./operations.md) | Backups, test-restore, and error logging/alerting runbook |
@@ -27,7 +27,7 @@ Named after Kant's *noumenon*: the thing that exists beyond what can ever be ful
 
 ## Current State
 
-A walkable library (M1 reached), now with a reading experience (Phase 5). You wander by address — random, next, or typed — and each address crystallizes once on first visit and persists forever. First visits reveal via a Suspense boundary (shell streams instantly, the leaf swaps in when it crystallizes); revisits load instantly. Moderation gates every commit; failures and takedowns render graceful placeholder leaves. See the [Roadmap](./roadmap.md) for what's next (economics & safety controls, permanence, the AI reader layer).
+A safe, sustainable, walkable library (**M2 reached**) in launch hardening. You wander by address — random, next, or typed — and each address crystallizes once on first visit and persists forever (first visits reveal via a Suspense boundary; revisits load instantly). Moderation gates every commit; failures and takedowns render graceful placeholder leaves. Economics & safety controls (rate limit + spend cap) and permanence (nightly off-provider backup + test-restore + alerting) are live. A legal footer / `/about` disclaimer and abuse-report path are in place. See the [Roadmap](./roadmap.md) for what remains before public launch (enabling moderation reliably, the success-bar eval, tuning).
 
 - **Runtime**: Next.js App Router + TypeScript + Tailwind
 - **Store**: Neon Postgres (generate-once / store-forever)

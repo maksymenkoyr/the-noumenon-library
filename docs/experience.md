@@ -30,20 +30,9 @@ Rendering follows from this: text is **top-aligned** with honest whitespace belo
 
 ## The carried question
 
-The visitor brings something unresolved into the library. The library does not know what it is. The AI reader watches for resonance.
+The visitor brings something unresolved into the library.
 
-This is the primary use pattern: not finding, but wandering with intent. The question you carry shapes what you notice, not what the library shows you.
-
----
-
-## AI reader layer
-
-The AI reader sits on top of the library as a reader, not a generator. It does not write pages. It:
-- Interprets what a page might mean
-- Surfaces resonant lines
-- Suggests where to walk next — based on the page, not on semantic search
-
-The AI reader is a companion for the wanderer. It gives language to what is hard to name.
+This is the primary use pattern: not finding, but wandering with intent. The question you carry shapes what you notice, not what the library shows you. It is a stance the visitor holds, not a feature the system reads — nothing watches you, and the library never knows what you came in with.
 
 ---
 
