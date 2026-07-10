@@ -27,6 +27,12 @@ export type ResolvedStatus = "ok" | "taken_down" | "explore";
 export interface ResolvedPage {
   status: ResolvedStatus;
   text: string;
+  // Dev-overlay provenance (lib/devMode, app/[[...address]]/dev-badge), ignored
+  // by non-dev callers. `model` is present whenever known — a fresh generation
+  // and a committed revisit alike; `durationMs` is measured live during a fresh
+  // generation only, so revisits (never re-timed) leave it undefined.
+  model?: string;
+  durationMs?: number;
 }
 
 const TAKEN_DOWN_PLACEHOLDER =
@@ -99,10 +105,12 @@ async function generateAndCommit(
   await noteGeneration(ctx);
 
   try {
+    const startedAt = Date.now();
     const { content, provenance, usage } = await generatePipeline(address);
+    const durationMs = Date.now() - startedAt;
     await commitPage(address, content, provenance);
     await recordSpend(usage);
-    return { status: "ok", text: content };
+    return { status: "ok", text: content, model: provenance.model, durationMs };
   } catch (error) {
     // Unwedge the address so the next visitor becomes the first visitor. Covers
     // provider errors, an undetermined moderation result (lib/moderate throws),
@@ -119,7 +127,10 @@ async function generateAndCommit(
 }
 
 function resolved(row: PageRow): ResolvedPage {
-  if (row.status === "ok") return { status: "ok", text: row.content ?? "" };
+  // Revisit: the model is on the stored row; duration was never persisted
+  // (live-only), so the overlay shows model without a time.
+  if (row.status === "ok")
+    return { status: "ok", text: row.content ?? "", model: row.model ?? undefined };
   // taken_down is the only remaining non-ok terminal state.
   return { status: "taken_down", text: TAKEN_DOWN_PLACEHOLDER };
 }

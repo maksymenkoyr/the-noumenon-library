@@ -5,10 +5,14 @@
  * redemption drops an HMAC-signed session cookie so that browser wanders freely
  * (docs: private-share deploy).
  *
- * The session cookie is stateless: `<randomId>.<HMAC(secret, randomId)>`. The
- * proxy verifies the signature with Web Crypto only (no DB, no per-request
- * lookup), so it stays cheap and runtime-portable. Token validity is checked in
- * the DB at redemption, not here.
+ * The session cookie is stateless: `<payload>.<HMAC(secret, payload)>`, where
+ * the payload is `v1.<devFlag>.<uuid>` — the random UUID keeps each session
+ * unique, and the flag carries the invite's dev-mode grant (readSessionClaims)
+ * so a per-request check needs no DB lookup. The proxy verifies the signature
+ * with Web Crypto only (no DB, no per-request lookup), so it stays cheap and
+ * runtime-portable. Token validity is checked in the DB at redemption, not here.
+ * Legacy bare-`<uuid>` payloads still verify, so no session is logged out by the
+ * format change.
  *
  * Honest limits (see the design discussion): access is a shared bearer secret.
  * The invite link is reusable and the session cookie is copyable, so anyone the
@@ -47,11 +51,26 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** Mint a fresh signed session value to store in the cookie. */
-export async function signSession(secret: string): Promise<string> {
-  const id = crypto.randomUUID();
-  const sig = await hmac(secret, id);
-  return `${id}.${sig}`;
+/** Claims carried, signed, inside the session cookie. */
+export interface SessionClaims {
+  /** The visitor redeemed a dev-flagged invite → sees the dev overlay. */
+  dev: boolean;
+}
+
+const PAYLOAD_VERSION = "v1";
+
+/**
+ * Mint a fresh signed session value to store in the cookie. The signed payload
+ * is `v1.<devFlag>.<uuid>`: the random UUID makes every session value unique,
+ * the flag records the invite's dev grant so no later request needs a DB lookup.
+ */
+export async function signSession(
+  secret: string,
+  claims: Partial<SessionClaims> = {},
+): Promise<string> {
+  const payload = `${PAYLOAD_VERSION}.${claims.dev ? 1 : 0}.${crypto.randomUUID()}`;
+  const sig = await hmac(secret, payload);
+  return `${payload}.${sig}`;
 }
 
 /** Verify a cookie value was signed by `secret`. */
@@ -62,9 +81,29 @@ export async function verifySession(
   if (!value) return false;
   const dot = value.lastIndexOf(".");
   if (dot <= 0) return false;
-  const id = value.slice(0, dot);
+  const payload = value.slice(0, dot);
   const sig = value.slice(dot + 1);
-  return timingSafeEqual(sig, await hmac(secret, id));
+  return timingSafeEqual(sig, await hmac(secret, payload));
+}
+
+/**
+ * Verify a cookie and read its claims — null for a missing/forged value. A valid
+ * legacy cookie (bare `<uuid>` payload, minted before the format change) verifies
+ * with `dev: false`; only a `v1.<flag>.<uuid>` payload carries a real grant.
+ */
+export async function readSessionClaims(
+  secret: string,
+  value: string | undefined,
+): Promise<SessionClaims | null> {
+  if (!(await verifySession(secret, value))) return null;
+  const payload = value!.slice(0, value!.lastIndexOf("."));
+  const parts = payload.split(".");
+  // A UUID has no dots, so a legacy payload splits to one part; the versioned
+  // payload splits to exactly three with the version marker leading.
+  if (parts.length === 3 && parts[0] === PAYLOAD_VERSION) {
+    return { dev: parts[1] === "1" };
+  }
+  return { dev: false };
 }
 
 /** Minimal "this is private" page, shown to any request without a valid session. */

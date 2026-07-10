@@ -60,3 +60,9 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   redeemed_at TIMESTAMPTZ,             -- most recent successful redemption
   redeemed_ip TEXT                     -- best-effort, for the operator's record
 );
+
+-- Dev-mode grant: an invite flagged here redeems into a session that sees the
+-- dev overlay (model + generation time; lib/devMode, app/[[...address]]). The
+-- claim is baked into the signed cookie at redemption, so upgrading an already-
+-- redeemed link takes effect only after it is re-clicked. Additive/idempotent.
+ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS dev_mode BOOLEAN NOT NULL DEFAULT false;
