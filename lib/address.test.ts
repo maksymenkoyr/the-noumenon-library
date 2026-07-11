@@ -8,8 +8,11 @@ import {
   addressPath,
   formatAddress,
   nextAddress,
+  nextPageInVolume,
   normalizeAddress,
+  prevPageInVolume,
   randomAddress,
+  volumeKey,
   type Address,
 } from "./address";
 
@@ -187,6 +190,32 @@ describe("nextAddress", () => {
       const next = nextAddress(randomAddress());
       expect(normalizeAddress(formatAddress(next).split("/"))).toEqual(next);
     }
+  });
+});
+
+describe("volume-scoped helpers (books experiment)", () => {
+  it("volumeKey is the address prefix without the page", () => {
+    expect(volumeKey(addr("io-9", 3, 2, 17, 308))).toBe("io-9/3/2/17");
+  });
+
+  it("prevPageInVolume steps back within the volume, null at page 1", () => {
+    expect(prevPageInVolume(addr("g", 1, 1, 1, 2))).toEqual(
+      addr("g", 1, 1, 1, 1),
+    );
+    expect(prevPageInVolume(addr("g", 1, 1, 1, 1))).toBeNull();
+  });
+
+  it("nextPageInVolume steps forward within the volume, null at the last page", () => {
+    expect(nextPageInVolume(addr("g", 1, 1, 1, 1))).toEqual(
+      addr("g", 1, 1, 1, 2),
+    );
+    expect(nextPageInVolume(addr("g", 1, 1, 1, PAGES))).toBeNull();
+  });
+
+  it("never crosses the volume boundary, unlike nextAddress", () => {
+    const lastPage = addr("g", 1, 1, 1, PAGES);
+    expect(nextAddress(lastPage)).toEqual(addr("g", 1, 1, 2, 1));
+    expect(nextPageInVolume(lastPage)).toBeNull();
   });
 });
 

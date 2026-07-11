@@ -20,6 +20,9 @@ export interface PageRow {
   seed_word: string | null;
   created_at: Date;
   committed_at: Date | null;
+  // Reverse-bell-curve digest for neighbor context (docs/books.md); NULL for
+  // pre-book-mode pages until condensed lazily on first neighbor read.
+  condensed: string | null;
 }
 
 export interface PageProvenance {
@@ -153,6 +156,104 @@ export async function releaseReservation(address: string): Promise<void> {
   await query(
     "DELETE FROM pages WHERE address = $1 AND status = 'generating'",
     [address],
+  );
+}
+
+// --- Books experiment (docs/books.md): volume = book -----------------------
+
+export interface BookRow {
+  volume_key: string;
+  form: string;
+  title: string | null;
+  tags: string[] | null;
+  model: string | null;
+  prompt_variant: string | null;
+  created_at: Date;
+  titled_at: Date | null;
+}
+
+export async function getBook(volumeKey: string): Promise<BookRow | null> {
+  const rows = await query<BookRow>(
+    "SELECT * FROM books WHERE volume_key = $1",
+    [volumeKey],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Create-or-get a book row, locking its form at creation. Race-safe the same
+ * way reservePage is: of N concurrent first-pages in a volume, exactly one
+ * INSERT wins and everyone re-reads the winner's form.
+ */
+export async function ensureBook(
+  volumeKey: string,
+  form: string,
+): Promise<BookRow> {
+  const rows = await query<BookRow>(
+    `INSERT INTO books (volume_key, form)
+     VALUES ($1, $2)
+     ON CONFLICT (volume_key) DO NOTHING
+     RETURNING *`,
+    [volumeKey, form],
+  );
+  if (rows[0]) return rows[0];
+  const existing = await getBook(volumeKey);
+  if (!existing) throw new Error(`Book vanished after conflict: ${volumeKey}`);
+  return existing;
+}
+
+/**
+ * Fill title/tags exactly once (from the book's first committed page). The
+ * `title IS NULL` guard makes concurrent fillers race safely — returns whether
+ * this caller won. A parse/LLM failure upstream simply leaves title NULL, and
+ * the next page generated in the volume retries.
+ */
+export async function fillBookMetadata(
+  volumeKey: string,
+  title: string,
+  tags: string[],
+  provenance: { model: string; prompt_variant: string },
+): Promise<boolean> {
+  const rows = await query(
+    `UPDATE books SET
+       title = $2,
+       tags = $3,
+       model = $4,
+       prompt_variant = $5,
+       titled_at = now()
+     WHERE volume_key = $1 AND title IS NULL
+     RETURNING volume_key`,
+    [volumeKey, title, tags, provenance.model, provenance.prompt_variant],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Committed pages among the given addresses, one query. Only 'ok' rows —
+ * a neighbor mid-generation or taken down contributes no continuity context.
+ */
+export async function getCommittedPages(
+  addresses: string[],
+): Promise<PageRow[]> {
+  if (addresses.length === 0) return [];
+  return query<PageRow>(
+    "SELECT * FROM pages WHERE address = ANY($1) AND status = 'ok'",
+    [addresses],
+  );
+}
+
+/**
+ * Persist a page's condensation (post-commit or lazily on neighbor read).
+ * Guarded to 'ok' rows so a takedown between read and write can't resurrect
+ * content into the condensed column.
+ */
+export async function setCondensed(
+  address: string,
+  condensed: string,
+): Promise<void> {
+  await query(
+    "UPDATE pages SET condensed = $2 WHERE address = $1 AND status = 'ok'",
+    [address, condensed],
   );
 }
 

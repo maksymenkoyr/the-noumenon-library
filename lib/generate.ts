@@ -22,6 +22,22 @@ export interface GenerationLevers {
   temperature: number;
   promptVariant: string;
   form: string;
+  // Books experiment (docs/books.md): condensed committed neighbors, passed
+  // through to the prompt. Not levers proper — continuity context — but they
+  // travel with the levers so regeneration retries keep the same seams.
+  prev?: string;
+  next?: string;
+}
+
+/**
+ * Book-mode pins the form (the book's locked register) and the prompt
+ * variant; model and temperature jitter stay random per attempt.
+ */
+export interface LeverOverrides {
+  form?: string;
+  promptVariant?: string;
+  prev?: string;
+  next?: string;
 }
 
 function pick<T>(pool: readonly T[]): T {
@@ -39,18 +55,21 @@ function jitteredTemperature(): number {
  * random form/register for the page, and a per-page jittered temperature — all
  * logged as provenance so the library's own evolution stays mappable.
  */
-export function chooseLevers(): GenerationLevers {
+export function chooseLevers(overrides: LeverOverrides = {}): GenerationLevers {
   const model = pick(config.generationModels);
-  const form = pick(GENERATION_FORMS);
+  const form = overrides.form ?? pick(GENERATION_FORMS);
+  const promptVariant = overrides.promptVariant ?? DEFAULT_PROMPT_VARIANT;
   const temperature = jitteredTemperature();
   devLog(
-    `generate model=${model} temp=${temperature.toFixed(2)} form="${form}"`,
+    `generate model=${model} temp=${temperature.toFixed(2)} form="${form}" variant=${promptVariant}`,
   );
   return {
     model,
     temperature,
-    promptVariant: DEFAULT_PROMPT_VARIANT,
+    promptVariant,
     form,
+    prev: overrides.prev,
+    next: overrides.next,
   };
 }
 
@@ -67,6 +86,8 @@ export async function generatePage(
   const prompt = buildPrompt(levers.promptVariant, {
     maxWords: config.pageMaxWords,
     form: levers.form,
+    prev: levers.prev,
+    next: levers.next,
   });
 
   const response = await getOpenRouter().chat.completions.create({
