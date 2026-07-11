@@ -131,3 +131,90 @@ CREATE TABLE IF NOT EXISTS engagement_rate_limit_hits (
 );
 CREATE INDEX IF NOT EXISTS engagement_rate_limit_hits_ip_time_idx
   ON engagement_rate_limit_hits (ip_hash, created_at);
+
+-- Operator grant: an invite flagged here redeems into a session that can see
+-- /operator (lib/operatorMode.ts) — same claim mechanism as dev_mode above,
+-- baked into the signed cookie at redemption (re-click to pick up an upgrade).
+-- Additive/idempotent.
+ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS operator BOOLEAN NOT NULL DEFAULT false;
+
+-- Insight views (docs/architecture.md §8, Phase 10 "Both": SQL views as the
+-- source of truth, read by lib/insights.ts and rendered on /operator).
+-- Gotcha: CREATE OR REPLACE VIEW cannot drop or reorder existing columns,
+-- only append new ones at the end — a future shape change needs DROP VIEW
+-- first. "visits" always means dwell-beacon rows (>=1s visible dwell; see
+-- marks.tsx's "ignore sub-second glances") — the only visit proxy the
+-- no-identifiers privacy posture (docs/legal.md) allows; there is no raw
+-- page-view counter. Views must appear after all table DDL; page_signals
+-- must appear before the rollup views that select from it.
+
+-- Per-page rollup: provenance + every reader signal, one row per committed
+-- ('ok') page.
+CREATE OR REPLACE VIEW page_signals AS
+SELECT
+  p.address,
+  p.model,
+  p.prompt_variant,
+  p.temperature,
+  p.created_at,
+  COALESCE(l.count, 0)      AS likes,
+  COALESCE(d.count, 0)      AS dislikes,
+  COALESCE(r.open_reports, 0) AS open_reports,
+  COALESCE(e.visits, 0)     AS visits,
+  e.avg_dwell_ms,
+  e.median_dwell_ms
+FROM pages p
+LEFT JOIN page_likes l ON l.address = p.address
+LEFT JOIN page_dislikes d ON d.address = p.address
+LEFT JOIN (
+  SELECT address, count(*) FILTER (WHERE status = 'open') AS open_reports
+  FROM page_reports
+  GROUP BY address
+) r ON r.address = p.address
+LEFT JOIN (
+  SELECT
+    address,
+    count(*) AS visits,
+    avg(dwell_ms) AS avg_dwell_ms,
+    round(percentile_cont(0.5) WITHIN GROUP (ORDER BY dwell_ms))::int AS median_dwell_ms
+  FROM engagement
+  GROUP BY address
+) e ON e.address = p.address
+WHERE p.status = 'ok';
+
+-- Per-model rollup over page_signals.
+CREATE OR REPLACE VIEW model_signals AS
+SELECT
+  model,
+  count(*)               AS pages,
+  sum(likes)              AS likes,
+  sum(dislikes)           AS dislikes,
+  sum(open_reports)       AS open_reports,
+  sum(visits)             AS visits,
+  avg(median_dwell_ms)    AS avg_median_dwell_ms
+FROM page_signals
+GROUP BY model;
+
+-- Per-prompt-variant rollup over page_signals.
+CREATE OR REPLACE VIEW variant_signals AS
+SELECT
+  prompt_variant,
+  count(*)               AS pages,
+  sum(likes)              AS likes,
+  sum(dislikes)           AS dislikes,
+  sum(open_reports)       AS open_reports,
+  sum(visits)             AS visits,
+  avg(median_dwell_ms)    AS avg_median_dwell_ms
+FROM page_signals
+GROUP BY prompt_variant;
+
+-- Per-arrival-route rollup, directly over engagement (not page_signals — every
+-- dwell beacon counts here, including ones on a page later taken down).
+CREATE OR REPLACE VIEW arrival_signals AS
+SELECT
+  arrived_via,
+  count(*)                                                              AS visits,
+  avg(dwell_ms)                                                         AS avg_dwell_ms,
+  round(percentile_cont(0.5) WITHIN GROUP (ORDER BY dwell_ms))::int     AS median_dwell_ms
+FROM engagement
+GROUP BY arrived_via;

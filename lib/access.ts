@@ -6,13 +6,14 @@
  * (docs: private-share deploy).
  *
  * The session cookie is stateless: `<payload>.<HMAC(secret, payload)>`, where
- * the payload is `v1.<devFlag>.<uuid>` — the random UUID keeps each session
- * unique, and the flag carries the invite's dev-mode grant (readSessionClaims)
- * so a per-request check needs no DB lookup. The proxy verifies the signature
- * with Web Crypto only (no DB, no per-request lookup), so it stays cheap and
- * runtime-portable. Token validity is checked in the DB at redemption, not here.
- * Legacy bare-`<uuid>` payloads still verify, so no session is logged out by the
- * format change.
+ * the payload is `v2.<devFlag>.<operatorFlag>.<uuid>` — the random UUID keeps
+ * each session unique, and the flags carry the invite's dev-mode / operator
+ * grants (readSessionClaims) so a per-request check needs no DB lookup. The
+ * proxy verifies the signature with Web Crypto only (no DB, no per-request
+ * lookup), so it stays cheap and runtime-portable. Token validity is checked
+ * in the DB at redemption, not here. Legacy `v1.<devFlag>.<uuid>` and bare-
+ * `<uuid>` payloads still verify (operator: false), so no session is logged
+ * out by either format change.
  *
  * Honest limits (see the design discussion): access is a shared bearer secret.
  * The invite link is reusable and the session cookie is copyable, so anyone the
@@ -55,20 +56,23 @@ function timingSafeEqual(a: string, b: string): boolean {
 export interface SessionClaims {
   /** The visitor redeemed a dev-flagged invite → sees the dev overlay. */
   dev: boolean;
+  /** The visitor redeemed an operator-flagged invite → can reach /operator. */
+  operator: boolean;
 }
 
-const PAYLOAD_VERSION = "v1";
+const PAYLOAD_VERSION = "v2";
 
 /**
  * Mint a fresh signed session value to store in the cookie. The signed payload
- * is `v1.<devFlag>.<uuid>`: the random UUID makes every session value unique,
- * the flag records the invite's dev grant so no later request needs a DB lookup.
+ * is `v2.<devFlag>.<operatorFlag>.<uuid>`: the random UUID makes every session
+ * value unique, the flags record the invite's dev / operator grants so no
+ * later request needs a DB lookup.
  */
 export async function signSession(
   secret: string,
   claims: Partial<SessionClaims> = {},
 ): Promise<string> {
-  const payload = `${PAYLOAD_VERSION}.${claims.dev ? 1 : 0}.${crypto.randomUUID()}`;
+  const payload = `${PAYLOAD_VERSION}.${claims.dev ? 1 : 0}.${claims.operator ? 1 : 0}.${crypto.randomUUID()}`;
   const sig = await hmac(secret, payload);
   return `${payload}.${sig}`;
 }
@@ -88,8 +92,10 @@ export async function verifySession(
 
 /**
  * Verify a cookie and read its claims — null for a missing/forged value. A valid
- * legacy cookie (bare `<uuid>` payload, minted before the format change) verifies
- * with `dev: false`; only a `v1.<flag>.<uuid>` payload carries a real grant.
+ * legacy cookie (bare `<uuid>` payload, minted before the dev-mode format change,
+ * or `v1.<devFlag>.<uuid>`, minted before the operator format change) verifies
+ * with the missing claims defaulted false; only a `v2.<dev>.<operator>.<uuid>`
+ * payload carries both real grants.
  */
 export async function readSessionClaims(
   secret: string,
@@ -98,12 +104,15 @@ export async function readSessionClaims(
   if (!(await verifySession(secret, value))) return null;
   const payload = value!.slice(0, value!.lastIndexOf("."));
   const parts = payload.split(".");
-  // A UUID has no dots, so a legacy payload splits to one part; the versioned
-  // payload splits to exactly three with the version marker leading.
-  if (parts.length === 3 && parts[0] === PAYLOAD_VERSION) {
-    return { dev: parts[1] === "1" };
+  // A UUID has no dots, so a legacy bare payload splits to one part; v1
+  // splits to three with its version marker leading; v2 to four.
+  if (parts.length === 4 && parts[0] === PAYLOAD_VERSION) {
+    return { dev: parts[1] === "1", operator: parts[2] === "1" };
   }
-  return { dev: false };
+  if (parts.length === 3 && parts[0] === "v1") {
+    return { dev: parts[1] === "1", operator: false };
+  }
+  return { dev: false, operator: false };
 }
 
 /** Minimal "this is private" page, shown to any request without a valid session. */
