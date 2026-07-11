@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { parsePressedEntry, type PressedEntry } from "@/lib/pressed";
+import { useSyncExternalStore } from "react";
+import { parsePressedEntry, PRESS_EVENT, type PressedEntry } from "@/lib/pressed";
 
 /**
  * The pressed leaves kept in this browser (lib/pressed.ts convention), newest
- * press first. Read once on mount — the page is reached by a full page load
- * (nav ethos), so there is no live state to subscribe to. `null` until the
- * effect runs, keeping the server render and hydration blank.
+ * press first. Same useSyncExternalStore idiom as the leaf marks: the server
+ * snapshot is a stable `null` (this listing is localStorage-only, so the
+ * server and hydration renders are blank), and the client snapshot is cached
+ * between storage events so it stays referentially stable.
  */
+
+let cache: PressedEntry[] | null = null;
 
 function readPressedEntries(): PressedEntry[] {
   const entries: PressedEntry[] = [];
@@ -25,14 +28,28 @@ function readPressedEntries(): PressedEntry[] {
   return entries.sort((a, b) => b.pressedAt - a.pressedAt);
 }
 
+function getSnapshot(): PressedEntry[] {
+  if (cache === null) cache = readPressedEntries();
+  return cache;
+}
+
+function subscribe(onChange: () => void): () => void {
+  const invalidate = () => {
+    cache = null;
+    onChange();
+  };
+  window.addEventListener(PRESS_EVENT, invalidate);
+  window.addEventListener("storage", invalidate);
+  return () => {
+    window.removeEventListener(PRESS_EVENT, invalidate);
+    window.removeEventListener("storage", invalidate);
+  };
+}
+
 export function LikedList() {
-  const [entries, setEntries] = useState<PressedEntry[] | null>(null);
+  const entries = useSyncExternalStore(subscribe, getSnapshot, () => null);
 
-  useEffect(() => {
-    setEntries(readPressedEntries());
-  }, []);
-
-  if (entries === null) return null;
+  if (entries === null) return null; // server render / hydrating
 
   if (entries.length === 0) {
     return (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { formatAddress, normalizeAddress } from "@/lib/address";
 
 /**
@@ -63,14 +64,15 @@ export function Nav({ nextHref }: { nextHref: string }) {
       >
         next →
       </a>
-      {/* No breadcrumb: /liked is a listing, not a leaf, and links from it
-          arrive outside the wandering gestures (arrived_via stays NULL). */}
-      <a
+      {/* A Link, not a full-load anchor: /liked is a listing, not a leaf, so
+          the full-page-load rule (server-side re-resolution) doesn't apply and
+          no arrived_via breadcrumb is written. */}
+      <Link
         href="/liked"
         className="shrink-0 hover:text-neutral-900 dark:hover:text-neutral-100"
       >
         liked
-      </a>
+      </Link>
       <form onSubmit={go} className="flex min-w-0 flex-1 items-center gap-2">
         <button
           type="submit"

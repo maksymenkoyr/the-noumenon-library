@@ -65,6 +65,37 @@ export async function getLikeCount(address: string): Promise<number> {
 }
 
 /**
+ * Apply a "not for me" mark (+1) or unmark (-1) — the silent counterpart of
+ * pressLeaf, against page_dislikes. The returned count is for tests and the
+ * operator's insight views only; it is never sent to readers (the dislike is a
+ * research signal, not a public score).
+ */
+export async function dislikeLeaf(
+  address: string,
+  disliked: boolean,
+): Promise<number> {
+  const delta = disliked ? 1 : -1;
+  const rows = await query<{ count: string }>(
+    `INSERT INTO page_dislikes (address, count)
+     VALUES ($1, GREATEST($2, 0))
+     ON CONFLICT (address) DO UPDATE SET
+       count = GREATEST(page_dislikes.count + $2, 0)
+     RETURNING count`,
+    [address, delta],
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+/** Current aggregate dislike count for a page (0 if none). Operator-only. */
+export async function getDislikeCount(address: string): Promise<number> {
+  const rows = await query<{ count: string }>(
+    "SELECT count FROM page_dislikes WHERE address = $1",
+    [address],
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+/**
  * Record one dwell-time event. `dwellMs` is bounded to a sane range (sub-zero or
  * absurd values are dropped, not stored); `arrivedVia` is best-effort and stored
  * only when it's one of the known values, else NULL. No identifiers — this is

@@ -13,6 +13,9 @@ import { formatAddress, normalizeAddress } from "./address";
 
 export const PRESSED_PREFIX = "noumenon:pressed:";
 
+// Fired on same-tab mark writes (cross-tab changes arrive as `storage`).
+export const PRESS_EVENT = "noumenon:pressed-change";
+
 export const pressedKey = (address: string) => PRESSED_PREFIX + address;
 
 export interface PressedEntry {

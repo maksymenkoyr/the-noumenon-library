@@ -199,10 +199,24 @@ export const config = {
   // generation/moderation/DB failures (docs/architecture.md §9, Phase 7). Unset
   // → structured JSON logs only, no push. Never let alerting break a request.
   monitorWebhookUrl: process.env.MONITOR_WEBHOOK_URL ?? "",
-  // Contact address for abuse/copyright reports, shown on /about (docs/legal.md,
-  // Phase 9). Email-only intake by design — the takedown stays a script, not an
-  // open endpoint. Unset → the about page says reporting is temporarily offline.
+  // Contact address for abuse/copyright reports, shown on /about and beside the
+  // on-page report control (docs/legal.md, Phase 9) as the manual channel.
+  // Unset → the about page says reporting is temporarily offline.
   reportContactEmail: process.env.REPORT_CONTACT_EMAIL ?? "",
+  // Operator notification for on-page reports (lib/reportEmail.ts): one Resend
+  // API call per newly-reported page, fail-open. All three unset by default —
+  // reports still land in page_reports and /operator, just without the push.
+  // The from-address domain must be verified in Resend for production sends;
+  // the resend.dev default only works for sends to the account owner.
+  get resendApiKey() {
+    return process.env.RESEND_API_KEY ?? "";
+  },
+  get reportNotifyEmail() {
+    return process.env.REPORT_NOTIFY_EMAIL ?? "";
+  },
+  get reportFromEmail() {
+    return process.env.REPORT_FROM_EMAIL ?? "reports@resend.dev";
+  },
   // True only in a real production deploy — gates the fail-closed moderation
   // guard (lib/moderate.ts): never store unmoderated content in production.
   isProduction: process.env.NODE_ENV === "production",

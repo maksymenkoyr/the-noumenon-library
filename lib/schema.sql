@@ -93,6 +93,33 @@ CREATE TABLE IF NOT EXISTS engagement (
 CREATE INDEX IF NOT EXISTS engagement_address_time_idx
   ON engagement (address, created_at);
 
+-- Silent negative signal — the "not for me" mark. Same aggregate-counter idiom
+-- as page_likes (per-reader state in localStorage, no identifiers), but the
+-- count is NEVER shown to readers: it exists only for the operator's insight
+-- views.
+CREATE TABLE IF NOT EXISTS page_dislikes (
+  address TEXT PRIMARY KEY REFERENCES pages(address),
+  count   BIGINT NOT NULL DEFAULT 0    -- clamped >= 0 by the writer (lib/engagement.ts)
+);
+
+-- Reader content reports — a moderation signal, distinct from the dislike
+-- taste signal. Append-only queue reviewed by the operator (/operator + the
+-- insight views); resolving a report does NOT take the page down
+-- (scripts/takedown.mjs remains the removal tool). NO user identifiers on the
+-- row (docs/legal.md) — abuse is bounded upstream by the hashed-IP engagement
+-- throttle, which never joins to this table.
+CREATE TABLE IF NOT EXISTS page_reports (
+  id          BIGSERIAL PRIMARY KEY,
+  address     TEXT NOT NULL REFERENCES pages(address),
+  reason      TEXT,                     -- optional, writer-truncated (lib/reports.ts)
+  status      TEXT NOT NULL             -- 'open' | 'resolved'
+              DEFAULT 'open',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS page_reports_status_time_idx
+  ON page_reports (status, created_at);
+
 -- Anti-gaming throttle for the reader-signal write endpoints (like / dwell),
 -- kept separate from rate_limit_hits so generation and engagement limits don't
 -- contaminate each other. Same append-only, hashed-IP, prune-outside-the-window
