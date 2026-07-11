@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { config } from "./config";
 import { query } from "./db";
+import { ipHash } from "./ipHash";
 import { devLog } from "./log";
 
 /**
@@ -27,14 +27,6 @@ export type AdmissionResult =
 export interface GenerationUsage {
   tokens: number;
   costUsd: number;
-}
-
-/**
- * Hash the IP before it touches the store — the rate-limit key is the only
- * quasi-identifier and is never persisted in the clear (§12, docs/legal.md).
- */
-function ipHash(ip: string): string {
-  return createHash("sha256").update(config.rateLimitSalt + ip).digest("hex");
 }
 
 /** Current calendar month in UTC, the monthly_spend primary key. */

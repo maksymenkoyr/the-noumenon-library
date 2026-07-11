@@ -180,6 +180,15 @@ export const config = {
   rateLimitWindowSeconds: numeric("RATE_LIMIT_WINDOW_SECONDS", 60),
   // Monthly spend cap (USD); over the cap flips the library to explore-only.
   monthlySpendCapUsd: numeric("MONTHLY_SPEND_CAP_USD", 10),
+  // Reader-signal write throttle (docs/architecture.md §8, Phase 10). Likes and
+  // dwell beacons are cheap DB writes (no LLM), so the ceiling is generous —
+  // it only blunts trivial gaming of the aggregate count / event flooding. Keyed
+  // by hashed IP over a sliding window, same as the generation rate limit.
+  engagementRateLimitPerMinute: numeric("ENGAGEMENT_RATE_LIMIT_PER_MINUTE", 60),
+  engagementRateLimitWindowSeconds: numeric(
+    "ENGAGEMENT_RATE_LIMIT_WINDOW_SECONDS",
+    60,
+  ),
   // Optional salt for the stored IP hash so it can't be reversed via a rainbow
   // table of the (small) address space. Empty = unsalted (still not the raw IP).
   rateLimitSalt: process.env.RATE_LIMIT_SALT ?? "",

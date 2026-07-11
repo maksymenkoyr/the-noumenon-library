@@ -51,9 +51,12 @@ export default function AboutPage() {
         <section className="flex flex-col gap-3">
           <h2 className="text-base font-medium">Privacy</h2>
           <p>
-            No accounts, and no personal data is collected to read. For rate
-            limiting only, a visitor&apos;s IP address is hashed (never stored in
-            the clear) and the hash is discarded shortly after — see the{" "}
+            No accounts, and no personal data is collected to read. If you
+            press a leaf, that mark is remembered only in your own browser; the
+            library keeps just an anonymous count per page, never tied to you.
+            For rate limiting only, a visitor&apos;s IP address is hashed (never
+            stored in the clear) and the hash is discarded shortly after — see
+            the{" "}
             <a
               href={`${SOURCE_URL}/blob/main/docs/legal.md`}
               className="underline underline-offset-2"

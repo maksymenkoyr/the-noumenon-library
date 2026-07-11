@@ -28,7 +28,9 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await query("TRUNCATE pages");
+  // CASCADE: pages is now FK-referenced by the reader-signal tables (page_likes,
+  // engagement); a bare TRUNCATE would error.
+  await query("TRUNCATE pages CASCADE");
 });
 
 afterAll(async () => {

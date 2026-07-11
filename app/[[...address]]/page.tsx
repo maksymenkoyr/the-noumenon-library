@@ -8,9 +8,11 @@ import {
   randomAddress,
 } from "@/lib/address";
 import { getClientIp } from "@/lib/clientIp";
+import { getLikeCount } from "@/lib/engagement";
 import { resolvePage, type ResolvedPage } from "@/lib/resolvePage";
 import { getPage } from "@/lib/store";
 import { CrystallizingLeaf, Leaf, PlaceholderLeaf } from "./leaf";
+import { Marks } from "./marks";
 import { Nav } from "./nav";
 
 export const runtime = "nodejs";
@@ -45,7 +47,7 @@ export default async function Page({
         <Nav nextHref={nextHref} />
       </header>
       {existing?.status === "ok" ? (
-        <Leaf>{existing.content ?? ""}</Leaf>
+        <CommittedLeaf address={canonical} text={existing.content ?? ""} />
       ) : existing?.status === "taken_down" ? (
         <PlaceholderLeaf variant="taken_down" />
       ) : (
@@ -80,7 +82,31 @@ async function PageBody({ address }: { address: string }) {
   if (resolved === "explore" || resolved.status === "explore") {
     return <PlaceholderLeaf variant="explore" />;
   }
-  if (resolved.status === "ok") return <Leaf>{resolved.text}</Leaf>;
+  if (resolved.status === "ok") {
+    return <CommittedLeaf address={address} text={resolved.text} />;
+  }
   // taken_down can surface here if a takedown lands while we waited.
   return <PlaceholderLeaf variant="taken_down" />;
+}
+
+/**
+ * A committed leaf and its reader marks (press count + dwell timer). The like
+ * count is a fast indexed lookup fetched here so it's co-located with the `ok`
+ * state — on the synchronous path it just adds one quick query to the render; on
+ * the streamed path it resolves inside the existing Suspense boundary.
+ */
+async function CommittedLeaf({
+  address,
+  text,
+}: {
+  address: string;
+  text: string;
+}) {
+  const likeCount = await getLikeCount(address);
+  return (
+    <>
+      <Leaf>{text}</Leaf>
+      <Marks address={address} initialCount={likeCount} />
+    </>
+  );
 }

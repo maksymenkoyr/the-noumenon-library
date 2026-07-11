@@ -41,7 +41,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await query("TRUNCATE pages, rate_limit_hits, monthly_spend");
+  await query("TRUNCATE pages, rate_limit_hits, monthly_spend CASCADE");
   generateMock.mockClear();
 });
 

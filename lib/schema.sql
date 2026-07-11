@@ -60,3 +60,41 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   redeemed_at TIMESTAMPTZ,             -- most recent successful redemption
   redeemed_ip TEXT                     -- best-effort, for the operator's record
 );
+
+-- Reader signals (docs/architecture.md §8 "engagement", Phase 10). Two idioms,
+-- both mirroring existing counter tables above:
+
+-- Aggregate "like"/press count per page — one row per address, upserted +/-1 as
+-- readers press or un-press a leaf (monthly_spend style). Per-reader state lives
+-- in the browser (localStorage), so no user identifiers are stored here; this is
+-- the public aggregate shown on the leaf and a success-bar research signal.
+CREATE TABLE IF NOT EXISTS page_likes (
+  address TEXT PRIMARY KEY REFERENCES pages(address),
+  count   BIGINT NOT NULL DEFAULT 0    -- clamped >= 0 by the writer (lib/engagement.ts)
+);
+
+-- Dwell-time signal — the reserved append-only research table (§8). Kept
+-- separate from `pages` so that precious table stays small and write-light.
+-- No user identifiers: aggregate behavioral signal, cross-referenceable with
+-- generation provenance, not per-person tracking (docs/legal.md).
+CREATE TABLE IF NOT EXISTS engagement (
+  id          BIGSERIAL PRIMARY KEY,
+  address     TEXT NOT NULL REFERENCES pages(address),
+  dwell_ms    INTEGER,                 -- time on page
+  arrived_via TEXT,                    -- 'random' | 'next' | 'typed' (best-effort, may be NULL)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS engagement_address_time_idx
+  ON engagement (address, created_at);
+
+-- Anti-gaming throttle for the reader-signal write endpoints (like / dwell),
+-- kept separate from rate_limit_hits so generation and engagement limits don't
+-- contaminate each other. Same append-only, hashed-IP, prune-outside-the-window
+-- pattern as rate_limit_hits; nothing retained long-term.
+CREATE TABLE IF NOT EXISTS engagement_rate_limit_hits (
+  id         BIGSERIAL PRIMARY KEY,
+  ip_hash    TEXT NOT NULL,           -- sha256(salt + ip); not reversible to the IP
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS engagement_rate_limit_hits_ip_time_idx
+  ON engagement_rate_limit_hits (ip_hash, created_at);

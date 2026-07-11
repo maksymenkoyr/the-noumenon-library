@@ -39,7 +39,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await query("TRUNCATE pages");
+  await query("TRUNCATE pages CASCADE");
   generateMock.mockReset();
   moderateMock.mockReset();
   monitorMock.mockReset();
