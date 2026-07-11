@@ -19,6 +19,20 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 const pressedKey = (address: string) => `noumenon:pressed:${address}`;
 const PRESS_EVENT = "noumenon:pressed-change";
 
+// The nav breadcrumb for `arrived_via`, claimed (read-and-cleared) once per page
+// load at module scope: the app navigates with full page loads, so this runs
+// exactly once per leaf, and an effect-scoped claim would be lost to StrictMode's
+// dev double-mount. On the server (SSR import) sessionStorage throws → null.
+const arrivedVia: string | null = (() => {
+  try {
+    const via = sessionStorage.getItem("noumenon:arrived-via");
+    sessionStorage.removeItem("noumenon:arrived-via");
+    return via;
+  } catch {
+    return null; // best-effort research signal
+  }
+})();
+
 function readPressed(address: string): boolean {
   try {
     return localStorage.getItem(pressedKey(address)) === "1";
@@ -106,7 +120,11 @@ export function Marks({
       try {
         navigator.sendBeacon(
           "/api/engagement",
-          JSON.stringify({ address, dwellMs: Math.round(accumulated) }),
+          JSON.stringify({
+            address,
+            dwellMs: Math.round(accumulated),
+            ...(arrivedVia ? { arrivedVia } : {}),
+          }),
         );
       } catch {
         /* best-effort research signal */
