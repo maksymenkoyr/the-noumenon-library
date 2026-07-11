@@ -91,7 +91,11 @@ function parseModelPrices(name: string): Record<string, number> {
   return prices;
 }
 
-const DEFAULT_GENERATION_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
+// nvidia/nemotron-3-super-120b-a12b:free (the prior default) was delisted from
+// OpenRouter's free tier as of 2026-07-11 — not merely 429ing, gone from the
+// catalog entirely. nvidia/nemotron-3-ultra-550b-a55b:free is its live
+// replacement (confirmed present, 1M context).
+const DEFAULT_GENERATION_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
 export type ModerationPolicy = "any-fail" | "majority" | "unanimous-fail";
 
@@ -127,26 +131,28 @@ export const config = {
   // Back-compat single generation model; the pool below supersedes it.
   model: process.env.GENERATION_MODEL ?? DEFAULT_GENERATION_MODEL,
   // Multi-model generation rotation — the "different gravity wells" variety
-  // lever (docs/generation.md). A page picks one at random; logged as `model`.
+  // lever (docs/generation.md). A page picks one pool member at random via
+  // chooseLevers(); generatePage() (lib/generate.ts) falls back through the
+  // rest of the pool on a retryable error (429 / 5xx / connection failure),
+  // so a single free-tier model being temporarily rate-limited no longer
+  // fails the request. The prior pool (llama-3.3-70b, qwen3-next-80b) was
+  // delisted from OpenRouter's free tier entirely as of 2026-07-11, not just
+  // 429ing — replaced below with currently-live free models.
   generationModels: list("GENERATION_MODELS", [
     process.env.GENERATION_MODEL ?? DEFAULT_GENERATION_MODEL,
-    // TEMPORARILY DISABLED (2026-07-02) — 429ing on the free tier. Nemotron is
-    // the only free model currently up. Uncomment to restore the rotation once
-    // free-tier availability recovers.
-    // "meta-llama/llama-3.3-70b-instruct:free",
-    // "qwen/qwen3-next-80b-a3b-instruct:free",
+    "tencent/hy3:free",
   ]),
   // Moderation pool (free models, mixed deterministic/non) and gate policy
-  // (docs/architecture.md §7).
+  // (docs/architecture.md §7). Fan-out is parallel (lib/moderate.ts), so a
+  // model erroring or 429ing just abstains rather than failing the request —
+  // no retry loop needed here, unlike generation. Dedicated safety classifier
+  // first, general models as backup voters. As above, the prior pool
+  // (llama-3.3-70b, gemma-4-31b-it, qwen3-next-80b) was delisted from
+  // OpenRouter's free tier entirely as of 2026-07-11.
   moderationModels: parseModerationModels("MODERATION_MODELS", [
-    // TEMPORARILY the whole free moderation pool was 429ing (2026-07-02), which
-    // is why moderation is also off via MODERATION_ENABLED=false. Nemotron is
-    // the only free model up, so it's the lone active entry for when moderation
-    // is switched back on. Uncomment the originals once availability recovers.
-    "nvidia/nemotron-3-super-120b-a12b:free@0",
-    // "meta-llama/llama-3.3-70b-instruct:free@0",
-    // "google/gemma-4-31b-it:free@0.7",
-    // "qwen/qwen3-next-80b-a3b-instruct:free@0",
+    "nvidia/nemotron-3.5-content-safety:free@0",
+    "nvidia/nemotron-3-ultra-550b-a55b:free@0",
+    "tencent/hy3:free@0",
   ]),
   moderationPolicy: moderationPolicy(),
   // Backstop only — the verdict is one token, but pool models may emit

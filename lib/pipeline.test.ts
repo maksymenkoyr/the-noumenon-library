@@ -31,8 +31,17 @@ const moderateMock = vi.mocked(moderate);
 const monitorMock = vi.mocked(monitor);
 const ADDR = "pipe/1/1/1/1";
 
-/** generatePage now returns text + usage; 100 tokens per call for accounting. */
-const gen = (text: string) => ({ text, usage: { tokens: 100, costUsd: 0 } });
+/**
+ * generatePage now returns text + model + usage; 100 tokens per call for
+ * accounting. `model` defaults to a fixed id since these tests mock
+ * generatePage directly — the real fallback behavior is covered in
+ * generate.test.ts.
+ */
+const gen = (text: string, model = "mock-model:free") => ({
+  text,
+  model,
+  usage: { tokens: 100, costUsd: 0 },
+});
 
 beforeAll(async () => {
   await query(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
@@ -138,5 +147,16 @@ describe("generatePipeline", () => {
 
     await generatePipeline(ADDR);
     expect(generateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the model that actually answered, even if generatePage fell back", async () => {
+    // generatePage() (lib/generate.ts) can fall back to a different pool
+    // model on a retryable error; its result.model may differ from the
+    // model chooseLevers() requested. Provenance must reflect the former.
+    generateMock.mockResolvedValue(gen("a unique page", "fallback-model:free"));
+
+    const result = await generatePipeline(ADDR);
+
+    expect(result.provenance.model).toBe("fallback-model:free");
   });
 });

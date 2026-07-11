@@ -36,10 +36,15 @@ function provenanceFrom(levers: GenerationLevers): PageProvenance {
 export async function generatePipeline(address: string): Promise<PipelineResult> {
   // Accumulate the cost of every generation call, including retries below.
   const usage: GenerationUsage = { tokens: 0, costUsd: 0 };
+  // Runs generation for the given levers, folds in usage, and — since
+  // generatePage() may fall back to a different pool model on a retryable
+  // error — updates `levers.model` in place so provenance always names the
+  // model that actually produced the content, not just the one requested.
   const run = async (l: GenerationLevers): Promise<string> => {
     const result = await generatePage(l);
     usage.tokens += result.usage.tokens;
     usage.costUsd += result.usage.costUsd;
+    l.model = result.model;
     return result.text;
   };
 
