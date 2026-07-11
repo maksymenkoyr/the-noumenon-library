@@ -33,17 +33,19 @@ export async function GET(request: NextRequest) {
   if (!token) return denied();
 
   const ip = await getClientIp();
-  const rows = await query<{ token: string }>(
+  const rows = await query<{ token: string; dev_mode: boolean }>(
     `UPDATE access_tokens
         SET redeemed_at = now(), redeemed_ip = $2
       WHERE token = $1
-      RETURNING token`,
+      RETURNING token, dev_mode`,
     [token, ip ?? null],
   );
   if (rows.length === 0) return denied(); // unknown token
 
   const response = NextResponse.redirect(new URL("/", request.url));
-  response.cookies.set(COOKIE_NAME, await signSession(secret), {
+  // Bake the invite's dev grant into the signed cookie, so the overlay check
+  // stays a stateless read (lib/devMode) — no per-request DB lookup.
+  response.cookies.set(COOKIE_NAME, await signSession(secret, { dev: rows[0].dev_mode }), {
     httpOnly: true,
     secure: true,
     sameSite: "lax",

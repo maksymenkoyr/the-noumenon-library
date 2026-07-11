@@ -55,7 +55,11 @@ afterAll(async () => {
 describe("resolvePage lifecycle", () => {
   it("generates and commits on first visit", async () => {
     const page = await resolvePage("a/1/1/1/1");
-    expect(page).toEqual({ status: "ok", text: "page for a/1/1/1/1" });
+    expect(page).toMatchObject({ status: "ok", text: "page for a/1/1/1/1" });
+    // Fresh generation carries dev-overlay provenance: the model and a live
+    // duration measurement (lib/devMode).
+    expect(page.model).toBe("test-model");
+    expect(typeof page.durationMs).toBe("number");
     expect(generateMock).toHaveBeenCalledTimes(1);
     const row = await getPage("a/1/1/1/1");
     expect(row?.status).toBe("ok");
@@ -69,7 +73,14 @@ describe("resolvePage lifecycle", () => {
   it("revisits return the identical stored page with no LLM call", async () => {
     const first = await resolvePage("b/1/1/1/1");
     const second = await resolvePage("b/1/1/1/1");
-    expect(second).toEqual(first);
+    // The stored page is identical (status/text/model); only the live-measured
+    // durationMs differs — present on the fresh generation, absent on revisit.
+    expect(second).toMatchObject({
+      status: first.status,
+      text: first.text,
+      model: first.model,
+    });
+    expect(second.durationMs).toBeUndefined();
     expect(generateMock).toHaveBeenCalledTimes(1);
   });
 
