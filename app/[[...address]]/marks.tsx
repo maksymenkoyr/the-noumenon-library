@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { pressedKey } from "@/lib/pressed";
 
 /**
  * Reader marks for a crystallized leaf (docs/architecture.md §8, Phase 10):
@@ -16,7 +17,6 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
  * committed (`ok`) leaf, so its address always has a row in `pages`.
  */
 
-const pressedKey = (address: string) => `noumenon:pressed:${address}`;
 const PRESS_EVENT = "noumenon:pressed-change";
 
 // The nav breadcrumb for `arrived_via`, claimed (read-and-cleared) once per page
@@ -35,7 +35,9 @@ const arrivedVia: string | null = (() => {
 
 function readPressed(address: string): boolean {
   try {
-    return localStorage.getItem(pressedKey(address)) === "1";
+    // Any non-null value is a press mark — old marks stored "1", newer ones a
+    // timestamp (lib/pressed.ts).
+    return localStorage.getItem(pressedKey(address)) !== null;
   } catch {
     return false; // localStorage disabled (private mode) — just never persists
   }
@@ -43,7 +45,8 @@ function readPressed(address: string): boolean {
 
 function writePressed(address: string, pressed: boolean): void {
   try {
-    if (pressed) localStorage.setItem(pressedKey(address), "1");
+    // The value is the press time, so /liked can order by recency.
+    if (pressed) localStorage.setItem(pressedKey(address), String(Date.now()));
     else localStorage.removeItem(pressedKey(address));
   } catch {
     /* non-fatal */

@@ -63,6 +63,14 @@ export function Nav({ nextHref }: { nextHref: string }) {
       >
         next →
       </a>
+      {/* No breadcrumb: /liked is a listing, not a leaf, and links from it
+          arrive outside the wandering gestures (arrived_via stays NULL). */}
+      <a
+        href="/liked"
+        className="shrink-0 hover:text-neutral-900 dark:hover:text-neutral-100"
+      >
+        liked
+      </a>
       <form onSubmit={go} className="flex min-w-0 flex-1 items-center gap-2">
         <button
           type="submit"
