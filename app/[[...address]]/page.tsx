@@ -8,6 +8,7 @@ import {
   randomAddress,
 } from "@/lib/address";
 import { getClientIp } from "@/lib/clientIp";
+import { config } from "@/lib/config";
 import { getDevMode } from "@/lib/devMode";
 import { getLikeCount } from "@/lib/engagement";
 import { resolvePage, type ResolvedPage } from "@/lib/resolvePage";
@@ -16,6 +17,7 @@ import { DevBadge } from "./dev-badge";
 import { CrystallizingLeaf, Leaf, PlaceholderLeaf } from "./leaf";
 import { Marks } from "./marks";
 import { Nav } from "./nav";
+import { Report } from "./report";
 
 export const runtime = "nodejs";
 export const maxDuration = 60; // Hobby cap; generations run 8–32s
@@ -141,6 +143,7 @@ async function CommittedLeaf({
       <Leaf>{text}</Leaf>
       {devMode && <DevBadge model={model} durationMs={durationMs} />}
       <Marks address={address} initialCount={likeCount} />
+      <Report address={address} contactEmail={config.reportContactEmail} />
     </>
   );
 }
