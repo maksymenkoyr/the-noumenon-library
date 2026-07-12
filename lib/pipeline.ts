@@ -1,7 +1,14 @@
+import type { BookContext } from "./book";
 import type { GenerationUsage } from "./economics";
-import { chooseLevers, generatePage, type GenerationLevers } from "./generate";
+import {
+  chooseLevers,
+  generatePage,
+  type GenerationLevers,
+  type LeverOverrides,
+} from "./generate";
 import { moderate } from "./moderate";
 import { monitor } from "./monitor";
+import { BOOK_PROMPT_VARIANT } from "./prompts";
 import { contentExistsElsewhere, hashContent, type PageProvenance } from "./store";
 
 /**
@@ -33,7 +40,22 @@ function provenanceFrom(levers: GenerationLevers): PageProvenance {
   };
 }
 
-export async function generatePipeline(address: string): Promise<PipelineResult> {
+export async function generatePipeline(
+  address: string,
+  bookCtx?: BookContext,
+): Promise<PipelineResult> {
+  // Book mode (docs/books.md) pins the book's locked form, the book variant,
+  // and the neighbor seams on EVERY attempt — including the moderation and
+  // dedup regenerations below — so a retry can't fall out of the book's voice.
+  const overrides: LeverOverrides = bookCtx
+    ? {
+        form: bookCtx.book.form,
+        promptVariant: BOOK_PROMPT_VARIANT,
+        prev: bookCtx.prev,
+        next: bookCtx.next,
+      }
+    : {};
+
   // Accumulate the cost of every generation call, including retries below.
   const usage: GenerationUsage = { tokens: 0, costUsd: 0 };
   const run = async (l: GenerationLevers): Promise<string> => {
@@ -44,12 +66,12 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   };
 
   // Track levers alongside content so provenance always matches what we commit.
-  let levers = chooseLevers();
+  let levers = chooseLevers(overrides);
   let content = await run(levers);
 
   if (!(await moderate(content)).ok) {
     // Moderation fail → regenerate once with fresh levers (architecture §7).
-    levers = chooseLevers();
+    levers = chooseLevers(overrides);
     content = await run(levers);
     if (!(await moderate(content)).ok) {
       // Two rejects in a row. We never store failing content, but we no longer
@@ -66,7 +88,7 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   // replace the already-passed content; otherwise keep the original (near-
   // duplicates are allowed by design — no dark-shelving for a mere collision).
   if (await contentExistsElsewhere(hashContent(content), address)) {
-    const dedupLevers = chooseLevers();
+    const dedupLevers = chooseLevers(overrides);
     const dedupContent = await run(dedupLevers);
     if ((await moderate(dedupContent)).ok) {
       levers = dedupLevers;

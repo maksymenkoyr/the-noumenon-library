@@ -19,6 +19,29 @@ CREATE TABLE IF NOT EXISTS pages (
 -- are allowed), we only check exact collisions before commit.
 CREATE INDEX IF NOT EXISTS pages_content_hash_idx ON pages (content_hash);
 
+-- Books experiment (docs/books.md): volume = book. One row per volume, created
+-- lazily when the volume's first page generates under BOOK_MODE. Keyed by the
+-- address prefix "gallery/wall/shelf/volume" — a prefix, not a page address,
+-- so no FK to pages is possible. The form is locked at creation and reused by
+-- every subsequent page in the book; title/tags are filled from the first
+-- committed page (post-commit call), staying NULL until that call succeeds.
+CREATE TABLE IF NOT EXISTS books (
+  volume_key     TEXT PRIMARY KEY,        -- e.g. 'io-9/3/2/17'
+  form           TEXT NOT NULL,           -- locked register for every page in the book
+  title          TEXT,                    -- NULL until filled from the first committed page
+  tags           TEXT[],                  -- 3–5 thematic tags; NULL until filled
+  model          TEXT,                    -- provenance of the title/tags call
+  prompt_variant TEXT,                    -- provenance of the title/tags call
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  titled_at      TIMESTAMPTZ              -- when title/tags were filled
+);
+
+-- Reverse-bell-curve condensation of a committed page (first/last sentences
+-- near-verbatim, middle summarized) — computed once post-commit, read as
+-- neighbor context under BOOK_MODE. NULL for pre-book-mode pages; filled
+-- lazily on first neighbor read. Additive/idempotent.
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS condensed TEXT;
+
 -- Economics & safety controls (docs/architecture.md §10, Phase 6). The counter
 -- store is Postgres (not edge KV): the DB is already provisioned and "fine at
 -- this scale" (§10), so no new infra is introduced.

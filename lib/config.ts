@@ -167,6 +167,16 @@ export const config = {
   // (and visibly truncate) the page.
   pageMaxWords: numeric("PAGE_MAX_WORDS", 400),
   maxTokens: numeric("GENERATION_MAX_TOKENS", 4000),
+  // Books experiment (docs/books.md): volume = book — locked form per volume,
+  // neighbor continuity via condensed prev/next in the prompt (variant
+  // 'book-v1'). Default off; BOOK_MODE=false is a full kill switch back to
+  // isolated base-v2 generation (existing book rows are simply ignored).
+  bookMode: process.env.BOOK_MODE === "true",
+  // Condensation shape (the reverse bell curve): first/last sentences are kept
+  // verbatim; only the middle is summarized, to at most this many words…
+  condensedMiddleMaxWords: numeric("CONDENSED_MIDDLE_MAX_WORDS", 60),
+  // …and a middle already shorter than this is kept as-is (no LLM call).
+  condenseMinMiddleWords: numeric("CONDENSE_MIN_MIDDLE_WORDS", 60),
   // Concurrency guard tunables (docs/architecture.md §3). The stale window
   // must comfortably exceed worst-case generation time — the current :free
   // reasoning model can take minutes; tighten when the model tier improves.
