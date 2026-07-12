@@ -33,24 +33,29 @@ export async function GET(request: NextRequest) {
   if (!token) return denied();
 
   const ip = await getClientIp();
-  const rows = await query<{ token: string; dev_mode: boolean }>(
+  const rows = await query<{ token: string; dev_mode: boolean; operator: boolean }>(
     `UPDATE access_tokens
         SET redeemed_at = now(), redeemed_ip = $2
       WHERE token = $1
-      RETURNING token, dev_mode`,
+      RETURNING token, dev_mode, operator`,
     [token, ip ?? null],
   );
   if (rows.length === 0) return denied(); // unknown token
 
   const response = NextResponse.redirect(new URL("/", request.url));
-  // Bake the invite's dev grant into the signed cookie, so the overlay check
-  // stays a stateless read (lib/devMode) — no per-request DB lookup.
-  response.cookies.set(COOKIE_NAME, await signSession(secret, { dev: rows[0].dev_mode }), {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 365, // one year
-  });
+  // Bake the invite's dev / operator grants into the signed cookie, so both
+  // checks stay a stateless read (lib/devMode, lib/operatorMode) — no
+  // per-request DB lookup.
+  response.cookies.set(
+    COOKIE_NAME,
+    await signSession(secret, { dev: rows[0].dev_mode, operator: rows[0].operator }),
+    {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365, // one year
+    },
+  );
   return response;
 }
