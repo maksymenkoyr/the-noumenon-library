@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     "Machine-generated fiction. A non-commercial art project. How to report content.",
 };
 
-const SOURCE_URL = "https://github.com/maksymenkoyr/the-noumenon-ibrary";
+const SOURCE_URL = "https://github.com/maksymenkoyr/the-noumenon-library";
 
 export default function AboutPage() {
   const email = config.reportContactEmail;
@@ -21,7 +21,10 @@ export default function AboutPage() {
   return (
     <main className="mx-auto flex w-full max-w-2xl grow flex-col gap-8 p-8">
       <header className="flex items-baseline gap-4 font-mono text-sm text-neutral-500">
-        <Link href="/" className="hover:text-neutral-900 dark:hover:text-neutral-100">
+        <Link
+          href="/"
+          className="hover:text-neutral-900 dark:hover:text-neutral-100"
+        >
           ← the library
         </Link>
         <span>about</span>
@@ -35,8 +38,9 @@ export default function AboutPage() {
             not exist until someone walks into them. Every page is{" "}
             <strong>machine-generated fiction</strong> — produced by a language
             model the first time its address is visited, then kept. No page is
-            written or reviewed by a person. Nothing here is a statement of fact,
-            and any resemblance to real texts, events, or people is coincidental.
+            written or reviewed by a person. Nothing here is a statement of
+            fact, and any resemblance to real texts, events, or people is
+            coincidental.
           </p>
         </section>
 
@@ -51,8 +55,8 @@ export default function AboutPage() {
         <section className="flex flex-col gap-3">
           <h2 className="text-base font-medium">Privacy</h2>
           <p>
-            No accounts, and no personal data is collected to read. If you
-            press a leaf, that mark is remembered only in your own browser; the
+            No accounts, and no personal data is collected to read. If you press
+            a leaf, that mark is remembered only in your own browser; the
             library keeps just an anonymous count per page, never tied to you.
             For rate limiting only, a visitor&apos;s IP address is hashed (never
             stored in the clear) and the hash is discarded shortly after — see
