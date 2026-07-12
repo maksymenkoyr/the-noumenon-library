@@ -104,3 +104,21 @@ CREATE TABLE IF NOT EXISTS engagement_rate_limit_hits (
 );
 CREATE INDEX IF NOT EXISTS engagement_rate_limit_hits_ip_time_idx
   ON engagement_rate_limit_hits (ip_hash, created_at);
+
+-- Per-model performance telemetry (lib/modelStats.ts, docs/architecture.md §6/§10).
+-- Fed by both the generation and moderation pipelines so free-vs-paid selection is
+-- data-driven: average latency (total_ms / calls) down-weights slow free models, and
+-- rate_limited_until parks a model that just errored so it's skipped until the cooldown
+-- expires. One sentinel row keyed '__free_tier__' (lib/modelStats.ts FREE_TIER_KEY) holds
+-- the account-wide OpenRouter `free-models-per-day` cooldown — that 429 flavor caps every
+-- :free model at once, so generation short-circuits straight to the paid tail instead of
+-- cycling the whole free pool. Recording is fire-and-forget: a stats-table hiccup must
+-- never break or slow a real generation/moderation call.
+CREATE TABLE IF NOT EXISTS model_stats (
+  model              TEXT PRIMARY KEY,          -- model id, or the '__free_tier__' sentinel
+  calls              BIGINT NOT NULL DEFAULT 0, -- successful sampled completions
+  total_ms           BIGINT NOT NULL DEFAULT 0, -- Σ duration; avg = total_ms / calls
+  errors             BIGINT NOT NULL DEFAULT 0, -- failed attempts (any error)
+  rate_limited_until TIMESTAMPTZ,               -- skip this model while now() < this
+  last_used_at       TIMESTAMPTZ
+);

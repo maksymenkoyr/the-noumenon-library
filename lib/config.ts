@@ -73,11 +73,12 @@ function parseModerationModels(
  * Parse a `modelId@usdPerMillionTokens` list into a price map for the spend
  * counter (docs/architecture.md §10). `@` is the separator (model ids never
  * contain it). A model absent from the map prices at 0 — correct for the free
- * (`:free`) tier, where the cap is armed but inert until a paid model is added.
+ * (`:free`) tier. `fallback` seeds the default paid-model prices so the spend
+ * cap meters real cost out of the box, without requiring an env override.
  */
-function parseModelPrices(name: string): Record<string, number> {
+function parseModelPrices(name: string, fallback: string[] = []): Record<string, number> {
   const prices: Record<string, number> = {};
-  for (const entry of list(name, [])) {
+  for (const entry of list(name, fallback)) {
     const at = entry.lastIndexOf("@");
     if (at === -1) {
       throw new Error(`Invalid ${name} entry (expected model@usdPerMillion): ${entry}`);
@@ -91,10 +92,16 @@ function parseModelPrices(name: string): Record<string, number> {
   return prices;
 }
 
-// nvidia/nemotron-3-super-120b-a12b:free (the prior default) was delisted from
-// OpenRouter's free tier as of 2026-07-11 — not merely 429ing, gone from the
-// catalog entirely. nvidia/nemotron-3-ultra-550b-a55b:free is its live
-// replacement (confirmed present, 1M context).
+// nvidia/nemotron-3-ultra-550b-a55b:free — strong 1M-context prose model,
+// confirmed live in the OpenRouter catalog (2026-07-12). Earlier comments in
+// this file claimed several free models (nemotron-3-super-120b-a12b,
+// llama-3.3-70b, qwen3-next-80b, gemma-4-31b-it) were "delisted 2026-07-11";
+// re-verified against the live /models endpoint on 2026-07-12 and that was
+// wrong — all four are still in the catalog. The actual recurring failure is
+// OpenRouter's account-wide `free-models-per-day` cap (50 requests/day without
+// credits), which 429s every `:free` model at once — cycling the free pool
+// doesn't help that, only a paid fallback does (see paidGenerationModels
+// below and lib/generate.ts's free-tier cooldown short-circuit).
 const DEFAULT_GENERATION_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
 
 export type ModerationPolicy = "any-fail" | "majority" | "unanimous-fail";
@@ -130,28 +137,40 @@ export const config = {
     : true,
   // Back-compat single generation model; the pool below supersedes it.
   model: process.env.GENERATION_MODEL ?? DEFAULT_GENERATION_MODEL,
-  // Multi-model generation rotation — the "different gravity wells" variety
-  // lever (docs/generation.md). A page picks one pool member at random via
-  // chooseLevers(); generatePage() (lib/generate.ts) falls back through the
-  // rest of the pool on a retryable error (429 / 5xx / connection failure),
-  // so a single free-tier model being temporarily rate-limited no longer
-  // fails the request. The prior pool (llama-3.3-70b, qwen3-next-80b) was
-  // delisted from OpenRouter's free tier entirely as of 2026-07-11, not just
-  // 429ing — replaced below with currently-live free models.
+  // Free generation pool — the "different gravity wells" variety lever
+  // (docs/generation.md), and the cost-minimizing default: pages are served
+  // from here whenever possible. chooseLevers() (lib/generate.ts) picks a
+  // primary member latency-weighted (via model_stats) so slow pool members
+  // are naturally down-weighted; generatePage() falls back through the rest
+  // of the pool on a retryable error (429 / 5xx / connection failure). When
+  // the OpenRouter account-wide free-cap 429 trips, selection short-circuits
+  // straight to paidGenerationModels below instead of cycling this pool.
   generationModels: list("GENERATION_MODELS", [
     process.env.GENERATION_MODEL ?? DEFAULT_GENERATION_MODEL,
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
     "tencent/hy3:free",
+  ]),
+  // Paid safety net for generation: the fallback tail once the free pool is
+  // exhausted or the account-wide free-cap cooldown is active (§ above).
+  // Defaults to the cheapest strong-prose tier on OpenRouter (verified
+  // 2026-07-12): ~$0.10-0.15 per million tokens, ~$0.0006/page. Step up to a
+  // pricier tier by overriding this env var — no code change needed.
+  paidGenerationModels: list("PAID_GENERATION_MODELS", [
+    "deepseek/deepseek-v4-flash",
+    "qwen/qwen3-235b-a22b-2507",
   ]),
   // Moderation pool (free models, mixed deterministic/non) and gate policy
   // (docs/architecture.md §7). Fan-out is parallel (lib/moderate.ts), so a
   // model erroring or 429ing just abstains rather than failing the request —
   // no retry loop needed here, unlike generation. Dedicated safety classifier
-  // first, general models as backup voters. As above, the prior pool
-  // (llama-3.3-70b, gemma-4-31b-it, qwen3-next-80b) was delisted from
-  // OpenRouter's free tier entirely as of 2026-07-11.
+  // first, general models as backup voters.
   moderationModels: parseModerationModels("MODERATION_MODELS", [
     "nvidia/nemotron-3.5-content-safety:free@0",
     "nvidia/nemotron-3-ultra-550b-a55b:free@0",
+    "meta-llama/llama-3.3-70b-instruct:free@0",
+    "qwen/qwen3-next-80b-a3b-instruct:free@0",
     "tencent/hy3:free@0",
   ]),
   moderationPolicy: moderationPolicy(),
@@ -199,8 +218,15 @@ export const config = {
   // table of the (small) address space. Empty = unsalted (still not the raw IP).
   rateLimitSalt: process.env.RATE_LIMIT_SALT ?? "",
   // Per-model price (USD per million tokens) for the spend counter. Free
-  // (`:free`) models are absent → price 0, so the cap is armed but inert now.
-  modelPrices: parseModelPrices("MODEL_PRICES"),
+  // (`:free`) models are absent → price 0. paidGenerationModels are priced by
+  // default so the $MONTHLY_SPEND_CAP_USD cap meters real spend the moment
+  // the paid safety net fires, with no env setup required. Prices are a
+  // single blended in/out rate (input:output ≈ 1:4, generation is output-
+  // heavy) rounded up slightly — conservative is safer than undercounting.
+  modelPrices: parseModelPrices("MODEL_PRICES", [
+    "deepseek/deepseek-v4-flash@0.15",
+    "qwen/qwen3-235b-a22b-2507@0.1",
+  ]),
   // Optional alert webhook (Discord/Slack-compatible) for monitor() events —
   // generation/moderation/DB failures (docs/architecture.md §9, Phase 7). Unset
   // → structured JSON logs only, no push. Never let alerting break a request.

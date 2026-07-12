@@ -49,12 +49,12 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   };
 
   // Track levers alongside content so provenance always matches what we commit.
-  let levers = chooseLevers();
+  let levers = await chooseLevers();
   let content = await run(levers);
 
   if (!(await moderate(content)).ok) {
     // Moderation fail → regenerate once with fresh levers (architecture §7).
-    levers = chooseLevers();
+    levers = await chooseLevers();
     content = await run(levers);
     if (!(await moderate(content)).ok) {
       // Two rejects in a row. We never store failing content, but we no longer
@@ -71,7 +71,7 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   // replace the already-passed content; otherwise keep the original (near-
   // duplicates are allowed by design — no dark-shelving for a mere collision).
   if (await contentExistsElsewhere(hashContent(content), address)) {
-    const dedupLevers = chooseLevers();
+    const dedupLevers = await chooseLevers();
     const dedupContent = await run(dedupLevers);
     if ((await moderate(dedupContent)).ok) {
       levers = dedupLevers;

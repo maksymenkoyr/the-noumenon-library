@@ -2,6 +2,15 @@ import OpenAI from "openai";
 import { config } from "./config";
 import type { GenerationUsage } from "./economics";
 import { devLog } from "./log";
+import {
+  FREE_TIER_KEY,
+  freeTierOnCooldown,
+  getModelStats,
+  markRateLimited,
+  modelOnCooldown,
+  recordModelCall,
+  type ModelStat,
+} from "./modelStats";
 import { getOpenRouter } from "./openrouter";
 import {
   buildPrompt,
@@ -39,6 +48,42 @@ function shuffled<T>(pool: readonly T[]): T[] {
   return copy;
 }
 
+function isFree(model: string): boolean {
+  return model.endsWith(":free");
+}
+
+/** Neutral latency assumption for a model with no samples yet (§ below). */
+const DEFAULT_AVG_MS = 5000;
+
+/**
+ * Latency-weighted random pick — favors faster models (weight ∝ 1/avgMs) so
+ * the pool naturally drifts away from slow members, while every eligible
+ * model keeps some chance of being sampled. A model with no data yet is
+ * treated as "average speed" (DEFAULT_AVG_MS) rather than dominating (as an
+ * artificially-low avgMs would) or starving (as an artificially-high one
+ * would) — it earns its real weight once model_stats has samples for it.
+ */
+function pickByLatency(pool: readonly string[], stats: Map<string, ModelStat>): string {
+  const weights = pool.map((m) => 1 / (stats.get(m)?.avgMs ?? DEFAULT_AVG_MS));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < pool.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return pool[i];
+  }
+  return pool[pool.length - 1]; // floating-point rounding fallback
+}
+
+/** Per-model cooldown after a retryable error — short, since it's per-model. */
+const MODEL_COOLDOWN_SECONDS = 60;
+/**
+ * Cooldown after the OpenRouter account-wide `free-models-per-day` cap trips
+ * — long, since the cap doesn't clear until the next UTC day and there is no
+ * point re-probing the whole free tier every request until then. 15 minutes
+ * bounds the blast radius of a stale cooldown without hammering the API.
+ */
+const ACCOUNT_FREE_CAP_COOLDOWN_SECONDS = 15 * 60;
+
 /**
  * Whether a failed OpenRouter call is worth retrying on a different pool
  * model: free-tier rate limits (429), transient server errors (5xx), and
@@ -51,6 +96,20 @@ function isRetryable(err: unknown): boolean {
   return err.status === undefined || err.status === 429 || err.status >= 500;
 }
 
+/**
+ * Whether a 429 is OpenRouter's account-wide `free-models-per-day` cap (50
+ * requests/day without credits) rather than an ordinary per-model rate
+ * limit. This flavor caps every `:free` model at once, so — unlike a normal
+ * 429 — cycling the free pool doesn't help; only the paid tail does. Detected
+ * primarily by message text; the `x-ratelimit-remaining: 0` header is a
+ * fallback for cases where the message wording drifts.
+ */
+function isAccountFreeCap(err: unknown): boolean {
+  if (!(err instanceof OpenAI.APIError) || err.status !== 429) return false;
+  if (err.message?.toLowerCase().includes("free-models-per-day")) return true;
+  return err.headers?.get?.("x-ratelimit-remaining") === "0";
+}
+
 /** Base temperature ± a uniform jitter, clamped to a valid sampling range. */
 function jitteredTemperature(): number {
   const offset = (Math.random() * 2 - 1) * config.temperatureJitter;
@@ -58,16 +117,39 @@ function jitteredTemperature(): number {
 }
 
 /**
- * Pick the entropy levers for one generation: a random model from the pool, a
- * random form/register for the page, and a per-page jittered temperature — all
- * logged as provenance so the library's own evolution stays mappable.
+ * Pick the primary model for one generation. Free models are preferred
+ * (latency-weighted among those not currently cooling down); the paid safety
+ * net (config.paidGenerationModels) is only used when the account-wide
+ * free-cap cooldown is active or every free pool member is individually
+ * cooling down — i.e. paid spend only happens on free-tier overflow.
  */
-export function chooseLevers(): GenerationLevers {
-  const model = pick(config.generationModels);
+function pickPrimaryModel(stats: Map<string, ModelStat>): string {
+  const eligibleFree = config.generationModels.filter((m) => !modelOnCooldown(stats, m));
+  if (!freeTierOnCooldown(stats) && eligibleFree.length > 0) {
+    return pickByLatency(eligibleFree, stats);
+  }
+  // Free tier capped or fully cooled down — fall to the paid safety net. If
+  // none is configured, still return something rather than throw: try free
+  // anyway (it may 429 again, but that's the same failure mode as before).
+  return config.paidGenerationModels.length > 0
+    ? pick(config.paidGenerationModels)
+    : pick(config.generationModels);
+}
+
+/**
+ * Pick the entropy levers for one generation: a latency- and cooldown-aware
+ * model pick (free-first, paid on overflow), a random form/register for the
+ * page, and a per-page jittered temperature — all logged as provenance so
+ * the library's own evolution stays mappable.
+ */
+export async function chooseLevers(): Promise<GenerationLevers> {
+  const stats = await getModelStats();
+  const model = pickPrimaryModel(stats);
   const form = pick(GENERATION_FORMS);
   const temperature = jitteredTemperature();
   devLog(
-    `generate model=${model} temp=${temperature.toFixed(2)} form="${form}"`,
+    `generate model=${model} tier=${isFree(model) ? "free" : "paid"} ` +
+      `temp=${temperature.toFixed(2)} form="${form}"`,
   );
   return {
     model,
@@ -92,10 +174,18 @@ export interface GenerationResult {
 /**
  * Generate the text found on a page with the given levers. Free-tier models
  * intermittently 429 or fail transiently, so this tries the chosen model
- * first, then falls back through the rest of the pool (shuffled) on a
- * retryable error — the "different gravity wells" variety lever doubling as
- * availability fallback. A non-retryable error (bad request, bad key, ...)
- * rethrows immediately since no other model would fix it.
+ * first, then falls back through the rest of the free pool (shuffled,
+ * cooldown-filtered) and finally the paid safety net on a retryable error —
+ * the "different gravity wells" variety lever doubling as availability
+ * fallback. A non-retryable error (bad request, bad key, ...) rethrows
+ * immediately since no other model would fix it.
+ *
+ * Every attempt's outcome (success/failure, duration) is recorded to
+ * model_stats (lib/modelStats.ts) fire-and-forget, so future picks get
+ * better latency data. If OpenRouter's account-wide free-cap 429 is
+ * detected, the remaining free attempts are dropped — cycling the capped
+ * free tier further would just burn requests for the same error — and the
+ * loop jumps straight to the paid tail.
  */
 export async function generatePage(
   levers: GenerationLevers,
@@ -105,13 +195,25 @@ export async function generatePage(
     form: levers.form,
   });
 
-  const rest = shuffled(
-    config.generationModels.filter((m) => m !== levers.model),
+  const stats = await getModelStats();
+  const freeCapActive = freeTierOnCooldown(stats);
+  const restFree = freeCapActive
+    ? []
+    : shuffled(
+        config.generationModels.filter(
+          (m) => m !== levers.model && !modelOnCooldown(stats, m),
+        ),
+      );
+  const paidTail = shuffled(
+    config.paidGenerationModels.filter((m) => m !== levers.model),
   );
-  const attempts = [levers.model, ...rest];
+
+  let attempts = [levers.model, ...restFree, ...paidTail];
 
   let lastErr: unknown;
-  for (const [i, model] of attempts.entries()) {
+  for (let i = 0; i < attempts.length; i++) {
+    const model = attempts[i];
+    const startedAt = Date.now();
     try {
       const response = await getOpenRouter().chat.completions.create({
         model,
@@ -119,6 +221,7 @@ export async function generatePage(
         max_tokens: config.maxTokens,
         messages: [{ role: "user", content: prompt }],
       });
+      void recordModelCall(model, { ms: Date.now() - startedAt, ok: true });
 
       const tokens = response.usage?.total_tokens ?? 0;
       const pricePerMillion = config.modelPrices[model] ?? 0;
@@ -130,7 +233,21 @@ export async function generatePage(
         usage: { tokens, costUsd },
       };
     } catch (err) {
+      void recordModelCall(model, { ms: Date.now() - startedAt, ok: false });
       lastErr = err;
+
+      if (isAccountFreeCap(err)) {
+        void markRateLimited(FREE_TIER_KEY, ACCOUNT_FREE_CAP_COOLDOWN_SECONDS);
+        // The whole free tier is capped for the day — drop any remaining
+        // free attempts so the loop jumps straight to the paid tail instead
+        // of burning requests on the same account-wide 429.
+        attempts = attempts.slice(0, i + 1).concat(
+          attempts.slice(i + 1).filter((m) => !isFree(m)),
+        );
+      } else if (isRetryable(err)) {
+        void markRateLimited(model, MODEL_COOLDOWN_SECONDS);
+      }
+
       if (!isRetryable(err) || i === attempts.length - 1) throw err;
       devLog(
         `generate model=${model} failed (${

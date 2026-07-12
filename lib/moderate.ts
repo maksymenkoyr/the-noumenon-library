@@ -1,5 +1,6 @@
 import { config, type ModerationModel, type ModerationPolicy } from "./config";
 import { devLog } from "./log";
+import { recordModelCall } from "./modelStats";
 import { monitor } from "./monitor";
 import { getOpenRouter } from "./openrouter";
 
@@ -60,20 +61,36 @@ function parseVerdict(reply: string | null | undefined): Verdict {
   return hasFail ? "fail" : "pass";
 }
 
+/**
+ * Classify one text with one moderation-pool model. Records its outcome to
+ * model_stats (lib/modelStats.ts) fire-and-forget — the same shared table
+ * generation reads for latency-weighted picks, so a model that's reliably
+ * slow-but-free here (tolerable: this fan-out is parallel and abstain-on-
+ * error) still surfaces as slow if it's ever added to the generation pool.
+ * Errors are rethrown unchanged so the existing Promise.allSettled → abstain
+ * behavior in moderate() is untouched.
+ */
 async function classify(
   entry: ModerationModel,
   text: string,
 ): Promise<Verdict> {
-  const response = await getOpenRouter().chat.completions.create({
-    model: entry.model,
-    temperature: entry.temperature,
-    max_tokens: config.moderationMaxTokens,
-    messages: [
-      { role: "system", content: MODERATION_PROMPT },
-      { role: "user", content: text },
-    ],
-  });
-  return parseVerdict(response.choices[0]?.message.content);
+  const startedAt = Date.now();
+  try {
+    const response = await getOpenRouter().chat.completions.create({
+      model: entry.model,
+      temperature: entry.temperature,
+      max_tokens: config.moderationMaxTokens,
+      messages: [
+        { role: "system", content: MODERATION_PROMPT },
+        { role: "user", content: text },
+      ],
+    });
+    void recordModelCall(entry.model, { ms: Date.now() - startedAt, ok: true });
+    return parseVerdict(response.choices[0]?.message.content);
+  } catch (err) {
+    void recordModelCall(entry.model, { ms: Date.now() - startedAt, ok: false });
+    throw err;
+  }
 }
 
 /**
