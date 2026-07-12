@@ -13,6 +13,8 @@ import { closePool, query } from "./db";
 import {
   admitEngagementWrite,
   canonicalizeAddress,
+  dislikeLeaf,
+  getDislikeCount,
   getLikeCount,
   pressLeaf,
   recordDwell,
@@ -26,7 +28,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await query(
-    "TRUNCATE pages, page_likes, engagement, engagement_rate_limit_hits",
+    "TRUNCATE pages, page_likes, page_dislikes, engagement, engagement_rate_limit_hits CASCADE",
   );
   // The signal tables FK to pages(address); marks only ever attach to a
   // committed leaf, so give the tests a real page row.
@@ -75,6 +77,30 @@ describe("pressLeaf / getLikeCount", () => {
   it("never drops below zero", async () => {
     expect(await pressLeaf(ADDR, false)).toBe(0);
     expect(await pressLeaf(ADDR, false)).toBe(0);
+  });
+});
+
+describe("dislikeLeaf / getDislikeCount", () => {
+  it("starts at zero", async () => {
+    expect(await getDislikeCount(ADDR)).toBe(0);
+  });
+
+  it("increments on mark and decrements on unmark", async () => {
+    expect(await dislikeLeaf(ADDR, true)).toBe(1);
+    expect(await dislikeLeaf(ADDR, true)).toBe(2);
+    expect(await getDislikeCount(ADDR)).toBe(2);
+    expect(await dislikeLeaf(ADDR, false)).toBe(1);
+    expect(await getDislikeCount(ADDR)).toBe(1);
+  });
+
+  it("never drops below zero", async () => {
+    expect(await dislikeLeaf(ADDR, false)).toBe(0);
+    expect(await dislikeLeaf(ADDR, false)).toBe(0);
+  });
+
+  it("does not touch the like counter", async () => {
+    await dislikeLeaf(ADDR, true);
+    expect(await getLikeCount(ADDR)).toBe(0);
   });
 });
 

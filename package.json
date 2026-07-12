@@ -13,7 +13,8 @@
     "invite": "node --env-file=.env.local scripts/invite.mjs",
     "backup": "node --env-file-if-exists=.env.local scripts/backup.mjs",
     "restore:verify": "node --env-file-if-exists=.env.local scripts/restore-verify.mjs",
-    "wander": "node scripts/wander-sample.mjs"
+    "wander": "node scripts/wander-sample.mjs",
+    "deploy:prod": "git push origin main:prod"
   },
   "dependencies": {
     "aws4fetch": "^1.0.20",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { formatAddress, normalizeAddress } from "@/lib/address";
 
 /**
@@ -15,6 +16,21 @@ import { formatAddress, normalizeAddress } from "@/lib/address";
  * rather than the router: `random` must re-resolve server-side on every click,
  * which client-side routing and Link prefetching would defeat.
  */
+/**
+ * Breadcrumb for the dwell beacon's `arrived_via` signal: written just before a
+ * navigation, read-and-cleared by marks.tsx on the next leaf. sessionStorage is
+ * per-tab, so a fresh tab (direct URL, shared link) correctly reports nothing.
+ */
+const ARRIVED_KEY = "noumenon:arrived-via";
+
+function breadcrumb(via: "random" | "next" | "typed"): void {
+  try {
+    sessionStorage.setItem(ARRIVED_KEY, via);
+  } catch {
+    /* best-effort research signal */
+  }
+}
+
 export function Nav({ nextHref }: { nextHref: string }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState(false);
@@ -27,6 +43,7 @@ export function Nav({ nextHref }: { nextHref: string }) {
       setError(true);
       return;
     }
+    breadcrumb("typed");
     window.location.assign(`/${formatAddress(address)}`);
   }
 
@@ -35,16 +52,27 @@ export function Nav({ nextHref }: { nextHref: string }) {
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
       <a
         href="/"
+        onClick={() => breadcrumb("random")}
         className="shrink-0 hover:text-neutral-900 dark:hover:text-neutral-100"
       >
         random
       </a>
       <a
         href={nextHref}
+        onClick={() => breadcrumb("next")}
         className="shrink-0 hover:text-neutral-900 dark:hover:text-neutral-100"
       >
         next →
       </a>
+      {/* A Link, not a full-load anchor: /liked is a listing, not a leaf, so
+          the full-page-load rule (server-side re-resolution) doesn't apply and
+          no arrived_via breadcrumb is written. */}
+      <Link
+        href="/liked"
+        className="shrink-0 hover:text-neutral-900 dark:hover:text-neutral-100"
+      >
+        liked
+      </Link>
       <form onSubmit={go} className="flex min-w-0 flex-1 items-center gap-2">
         <button
           type="submit"

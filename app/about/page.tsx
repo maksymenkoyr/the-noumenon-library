@@ -94,10 +94,11 @@ export default function AboutPage() {
         <section className="flex flex-col gap-3">
           <h2 className="text-base font-medium">Reporting content</h2>
           <p>
-            To report content — a copyright concern, or anything illegal — note
-            the <strong>address</strong> shown at the top of the page (for
+            To report content — a copyright concern, or anything illegal — use
+            the <strong>report</strong> control at the bottom of the page
+            itself, or note the <strong>address</strong> shown at the top (for
             example <code className="font-mono text-sm">io-9/3/2/17/308</code>)
-            and send it to us. Reported addresses are reviewed and, when
+            and email it to us. Reported addresses are reviewed and, when
             warranted, removed: the page is blanked and never regenerates.
           </p>
           {email ? (

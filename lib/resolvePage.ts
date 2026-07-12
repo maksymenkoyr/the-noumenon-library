@@ -1,9 +1,15 @@
+import { normalizeAddress } from "./address";
+import { maybeTitleBook, resolveBookContext, type BookContext } from "./book";
+import { condensePage } from "./condense";
+import { config } from "./config";
 import {
   checkAdmission,
   noteGeneration,
   recordSpend,
   type AdmissionContext,
+  type GenerationUsage,
 } from "./economics";
+import { devLog } from "./log";
 import { monitor } from "./monitor";
 import { generatePipeline } from "./pipeline";
 import {
@@ -12,6 +18,7 @@ import {
   reclaimStaleReservation,
   releaseReservation,
   reservePage,
+  setCondensed,
   waitForPage,
   type PageRow,
 } from "./store";
@@ -106,10 +113,40 @@ async function generateAndCommit(
 
   try {
     const startedAt = Date.now();
-    const { content, provenance, usage } = await generatePipeline(address);
+    // Books experiment (docs/books.md): resolve the book row + condensed
+    // neighbors before generating. Aux LLM cost (lazy neighbor condensation,
+    // and the post-commit calls below) accumulates here so recordSpend sees it.
+    const auxUsage: GenerationUsage = { tokens: 0, costUsd: 0 };
+    let bookCtx: BookContext | undefined;
+    if (config.bookMode) {
+      const addr = normalizeAddress(address.split("/"));
+      if (addr) bookCtx = await resolveBookContext(addr, auxUsage);
+    }
+    const { content, provenance, usage } = await generatePipeline(address, bookCtx);
     const durationMs = Date.now() - startedAt;
     await commitPage(address, content, provenance);
-    await recordSpend(usage);
+    if (bookCtx) {
+      // Post-commit, awaited but non-fatal — the page is already live, and
+      // detaching would drop the work when a serverless function freezes.
+      // Failures degrade: condensed stays NULL (the lazy neighbor-read path
+      // backstops it) and the title retries on the volume's next page.
+      try {
+        const { condensed, usage: condenseUsage } = await condensePage(content);
+        auxUsage.tokens += condenseUsage.tokens;
+        auxUsage.costUsd += condenseUsage.costUsd;
+        await setCondensed(address, condensed);
+      } catch (error) {
+        devLog(
+          `condensed write failed for ${address} (lazy path will retry):`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+      await maybeTitleBook(bookCtx.book, content, auxUsage); // never throws
+    }
+    await recordSpend({
+      tokens: usage.tokens + auxUsage.tokens,
+      costUsd: usage.costUsd + auxUsage.costUsd,
+    });
     return { status: "ok", text: content, model: provenance.model, durationMs };
   } catch (error) {
     // Unwedge the address so the next visitor becomes the first visitor. Covers
