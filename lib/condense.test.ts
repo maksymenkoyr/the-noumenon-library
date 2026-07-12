@@ -1,10 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.hoisted(() => {
+  process.env.DATABASE_URL =
+    process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/noumenon_test";
+  // condensePage() draws its model from the real model_registry pool (lib/
+  // registry.ts) — needs a configured provider key to be eligible.
+  process.env.OPENROUTER_API_KEY = "test-key";
+});
 
 const createMock = vi.fn();
-vi.mock("./openrouter", () => ({
-  getOpenRouter: () => ({ chat: { completions: { create: createMock } } }),
-}));
+vi.mock("./providers", async () => {
+  const actual = await vi.importActual<typeof import("./providers")>("./providers");
+  return { ...actual, getClient: () => ({ chat: { completions: { create: createMock } } }) };
+});
 
+import { closePool, query } from "./db";
 import { assembleCondensed, condensePage, extractSeams } from "./condense";
 
 /** Build a fake completion whose content is `content`. */
@@ -23,8 +34,24 @@ function fillerSentences(n: number): string {
   ).join(" ");
 }
 
+beforeAll(async () => {
+  await query(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
+  // ON CONFLICT DO NOTHING: several test files seed this same row into the
+  // shared test database (fileParallelism: false runs them sequentially, not
+  // isolated), so this must be idempotent regardless of run order.
+  await query(
+    `INSERT INTO model_registry (slug, provider, task, enabled, weight, temperature, max_tokens)
+     VALUES ('mock-model', 'openrouter', 'generation', true, 10, 0.9, 1000)
+     ON CONFLICT (slug, task) DO NOTHING`,
+  );
+});
+
 beforeEach(() => {
   createMock.mockReset();
+});
+
+afterAll(async () => {
+  await closePool();
 });
 
 describe("extractSeams", () => {

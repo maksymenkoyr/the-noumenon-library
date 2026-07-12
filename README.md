@@ -18,6 +18,14 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Environment variables
+
+Copy `.env.example` to `.env.local` and fill in what you need — at minimum
+`DATABASE_URL` and one of `OPENROUTER_API_KEY` / `GOOGLE_API_KEY` (the model
+pool's two providers, `lib/providers.ts`) to generate anything new. Every
+variable is server-only (read in `lib/config.ts`); none are `NEXT_PUBLIC_*`.
+See `docs/architecture.md` §11 for the full annotated list.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More

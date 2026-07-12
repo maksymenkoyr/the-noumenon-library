@@ -9,14 +9,16 @@ import { condensePage } from "./condense";
 import { config } from "./config";
 import type { GenerationUsage } from "./economics";
 import { devLog } from "./log";
+import { getModelStats } from "./modelStats";
 import { monitor } from "./monitor";
-import { getOpenRouter } from "./openrouter";
+import { getClient, reasoningParams } from "./providers";
 import {
   BOOK_PROMPT_VARIANT,
   GENERATION_FORMS,
   buildBookMetadataPrompt,
   parseBookMetadata,
 } from "./prompts";
+import { chooseGenerationModel } from "./registry";
 import {
   ensureBook,
   fillBookMetadata,
@@ -117,19 +119,26 @@ export async function maybeTitleBook(
 ): Promise<void> {
   if (book.title) return;
   try {
-    const model = pick(config.generationModels);
-    const response = await getOpenRouter().chat.completions.create({
-      model,
+    // Draws from the same weighted generation pool as page content (lib/
+    // registry.ts) rather than a bare uniform pick — title/tags is still a
+    // best-effort aux call (degrades to untitled on any failure below), but
+    // now respects the pool's health/enabled state too.
+    const chosen = await chooseGenerationModel(await getModelStats());
+    const client = getClient(chosen.provider);
+    if (!client) throw new Error(`No client for provider: ${chosen.provider}`);
+    const response = await client.chat.completions.create({
+      model: chosen.slug,
       temperature: 0.7,
-      // Cost backstop only; generous because reasoning tokens count (config.ts).
+      // Cost backstop only.
       max_tokens: config.maxTokens,
       messages: [
         { role: "user", content: buildBookMetadataPrompt(pageContent) },
       ],
+      ...reasoningParams(chosen.provider),
     });
     const tokens = response.usage?.total_tokens ?? 0;
     usage.tokens += tokens;
-    usage.costUsd += (tokens / 1_000_000) * (config.modelPrices[model] ?? 0);
+    usage.costUsd += (tokens / 1_000_000) * (config.modelPrices[chosen.slug] ?? 0);
 
     const parsed = parseBookMetadata(response.choices[0]?.message.content);
     if (!parsed) {
@@ -139,7 +148,7 @@ export async function maybeTitleBook(
       return;
     }
     const won = await fillBookMetadata(book.volume_key, parsed.title, parsed.tags, {
-      model,
+      model: chosen.slug,
       prompt_variant: BOOK_PROMPT_VARIANT,
     });
     if (won) {

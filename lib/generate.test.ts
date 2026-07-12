@@ -1,42 +1,21 @@
+import { readFileSync } from "node:fs";
 import OpenAI from "openai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
-  // A small, known pool so fallback order is deterministic to assert on: two
-  // free models plus a single paid safety-net model.
-  process.env.GENERATION_MODELS = "model-a:free,model-b:free";
-  process.env.PAID_GENERATION_MODELS = "model-paid:paid";
   process.env.DATABASE_URL =
     process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/noumenon_test";
+  process.env.OPENROUTER_API_KEY = "test-key";
 });
 
 const createMock = vi.fn();
-vi.mock("./openrouter", () => ({
-  getOpenRouter: () => ({ chat: { completions: { create: createMock } } }),
-}));
-
-// Mock only the DB-touching parts of modelStats; keep the real cooldown
-// helpers (freeTierOnCooldown/modelOnCooldown) so their logic is genuinely
-// exercised against whatever Map a test hands to getModelStats. vi.hoisted
-// is required here — vi.mock's factory is hoisted above regular top-level
-// const declarations, so it can only close over vi.hoisted() bindings.
-const { getModelStatsMock, recordModelCallMock, markRateLimitedMock } = vi.hoisted(() => ({
-  getModelStatsMock: vi.fn(async () => new Map()),
-  recordModelCallMock: vi.fn(async () => {}),
-  markRateLimitedMock: vi.fn(async () => {}),
-}));
-vi.mock("./modelStats", async () => {
-  const actual = await vi.importActual<typeof import("./modelStats")>("./modelStats");
-  return {
-    ...actual,
-    getModelStats: getModelStatsMock,
-    recordModelCall: recordModelCallMock,
-    markRateLimited: markRateLimitedMock,
-  };
+vi.mock("./providers", async () => {
+  const actual = await vi.importActual<typeof import("./providers")>("./providers");
+  return { ...actual, getClient: () => ({ chat: { completions: { create: createMock } } }) };
 });
 
+import { closePool, query } from "./db";
 import { chooseLevers, generatePage, type GenerationLevers } from "./generate";
-import { FREE_TIER_KEY } from "./modelStats";
 
 /** A minimal fake OpenAI chat completion. */
 function completion(content: string, totalTokens = 0) {
@@ -44,17 +23,33 @@ function completion(content: string, totalTokens = 0) {
 }
 
 const levers: GenerationLevers = {
-  model: "model-a:free",
+  model: "model-a",
+  provider: "openrouter",
   temperature: 0.9,
+  maxTokens: 1000,
   promptVariant: "base-v2",
   form: "a field guide entry",
 };
 
-beforeEach(() => {
+beforeAll(async () => {
+  await query(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
+});
+
+beforeEach(async () => {
   createMock.mockReset();
-  getModelStatsMock.mockReset().mockResolvedValue(new Map());
-  recordModelCallMock.mockReset().mockResolvedValue(undefined);
-  markRateLimitedMock.mockReset().mockResolvedValue(undefined);
+  await query("TRUNCATE model_registry, model_stats");
+  // A small, known 2-model pool so fallback order is deterministic to assert
+  // on (docs/architecture.md §6, model-pool rework).
+  await query(
+    `INSERT INTO model_registry (slug, provider, task, enabled, weight, temperature, max_tokens)
+     VALUES
+       ('model-a', 'openrouter', 'generation', true, 10, 0.9, 1000),
+       ('model-b', 'openrouter', 'generation', true, 10, 0.9, 1000)`,
+  );
+});
+
+afterAll(async () => {
+  await closePool();
 });
 
 describe("generatePage fallback", () => {
@@ -66,10 +61,10 @@ describe("generatePage fallback", () => {
     const result = await generatePage(levers);
 
     expect(result.text).toBe("fallback text");
-    expect(result.model).toBe("model-b:free");
+    expect(result.model).toBe("model-b");
     expect(createMock).toHaveBeenCalledTimes(2);
-    expect(createMock.mock.calls[0][0]).toMatchObject({ model: "model-a:free" });
-    expect(createMock.mock.calls[1][0]).toMatchObject({ model: "model-b:free" });
+    expect(createMock.mock.calls[0][0]).toMatchObject({ model: "model-a" });
+    expect(createMock.mock.calls[1][0]).toMatchObject({ model: "model-b" });
   });
 
   it("falls back on a 5xx and on a connection error, not just 429", async () => {
@@ -77,14 +72,28 @@ describe("generatePage fallback", () => {
       .mockRejectedValueOnce(new OpenAI.APIError(503, undefined, "unavailable", undefined))
       .mockResolvedValueOnce(completion("recovered", 10));
     const result = await generatePage(levers);
-    expect(result.model).toBe("model-b:free");
+    expect(result.model).toBe("model-b");
 
     createMock.mockReset();
     createMock
       .mockRejectedValueOnce(new OpenAI.APIConnectionError({ message: "ECONNRESET" }))
       .mockResolvedValueOnce(completion("recovered again", 10));
     const result2 = await generatePage(levers);
-    expect(result2.model).toBe("model-b:free");
+    expect(result2.model).toBe("model-b");
+  });
+
+  it("falls back on a 404 (delisted model) and marks it permanently unavailable", async () => {
+    createMock
+      .mockRejectedValueOnce(new OpenAI.APIError(404, undefined, "not found", undefined))
+      .mockResolvedValueOnce(completion("fallback", 5));
+
+    const result = await generatePage(levers);
+    expect(result.model).toBe("model-b");
+
+    const rows = await query<{ health: string }>(
+      "SELECT health FROM model_registry WHERE slug = 'model-a' AND task = 'generation'",
+    );
+    expect(rows[0]?.health).toBe("unavailable");
   });
 
   it("does not fall back on a non-retryable error (bad request)", async () => {
@@ -97,145 +106,81 @@ describe("generatePage fallback", () => {
     expect(createMock).toHaveBeenCalledTimes(1);
   });
 
-  it("rethrows the last error once the whole pool (free + paid) is exhausted", async () => {
+  it("rethrows the last error once the whole eligible pool is exhausted", async () => {
     createMock.mockRejectedValue(
       new OpenAI.APIError(429, undefined, "rate limited", undefined),
     );
 
     await expect(generatePage(levers)).rejects.toThrow(/rate limited/i);
-    // model-a, model-b, and the paid safety net all tried.
-    expect(createMock).toHaveBeenCalledTimes(3);
+    expect(createMock).toHaveBeenCalledTimes(2); // model-a, then model-b
   });
 
   it("reports the actually-answering model in the result, not just the requested one", async () => {
     createMock.mockResolvedValueOnce(completion("first try", 5));
     const result = await generatePage(levers);
-    expect(result.model).toBe("model-a:free");
+    expect(result.model).toBe("model-a");
     expect(createMock).toHaveBeenCalledTimes(1);
   });
 
-  it("records each attempt's outcome to model_stats, fire-and-forget", async () => {
+  it("skips a model that is already on cooldown when building the fallback list", async () => {
+    await query(
+      `UPDATE model_registry SET health = 'cooling', cooling_until = now() + interval '60 seconds'
+       WHERE slug = 'model-b' AND task = 'generation'`,
+    );
+    createMock.mockRejectedValueOnce(
+      new OpenAI.APIError(429, undefined, "rate limited", undefined),
+    );
+
+    // model-a fails; model-b is cooling and excluded from the fallback pool,
+    // so there's nothing left to try and the original error rethrows.
+    await expect(generatePage(levers)).rejects.toThrow(/rate limited/i);
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a 429'd model cooling so a later selection skips it", async () => {
     createMock
       .mockRejectedValueOnce(new OpenAI.APIError(429, undefined, "rate limited", undefined))
-      .mockResolvedValueOnce(completion("ok", 5));
+      .mockResolvedValueOnce(completion("fallback", 5));
 
     await generatePage(levers);
 
-    expect(recordModelCallMock).toHaveBeenCalledWith(
-      "model-a:free",
-      expect.objectContaining({ ok: false }),
+    const rows = await query<{ health: string; cooling_until: Date }>(
+      "SELECT health, cooling_until FROM model_registry WHERE slug = 'model-a' AND task = 'generation'",
     );
-    expect(recordModelCallMock).toHaveBeenCalledWith(
-      "model-b:free",
-      expect.objectContaining({ ok: true }),
-    );
-  });
-
-  it(
-    "on the account-wide free-cap 429, skips the rest of the free pool and " +
-      "jumps straight to the paid model",
-    async () => {
-      createMock
-        .mockRejectedValueOnce(
-          new OpenAI.APIError(
-            429,
-            undefined,
-            "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day",
-            undefined,
-          ),
-        )
-        .mockResolvedValueOnce(completion("paid tier saved the day", 20));
-
-      const result = await generatePage(levers);
-
-      expect(result.model).toBe("model-paid:paid");
-      // model-b:free was never called — only model-a (failed) then the paid model.
-      expect(createMock).toHaveBeenCalledTimes(2);
-      expect(createMock.mock.calls[0][0]).toMatchObject({ model: "model-a:free" });
-      expect(createMock.mock.calls[1][0]).toMatchObject({ model: "model-paid:paid" });
-      expect(markRateLimitedMock).toHaveBeenCalledWith(FREE_TIER_KEY, expect.any(Number));
-    },
-  );
-
-  it("also detects the account-wide free-cap via the rate-limit header when the message text doesn't mention it", async () => {
-    const headers = { get: (name: string) => (name === "x-ratelimit-remaining" ? "0" : null) };
-    createMock
-      .mockRejectedValueOnce(
-        new OpenAI.APIError(429, undefined, "too many requests", headers as unknown as Headers),
-      )
-      .mockResolvedValueOnce(completion("paid tier saved the day", 20));
-
-    const result = await generatePage(levers);
-
-    expect(result.model).toBe("model-paid:paid");
-    expect(createMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("skips a free pool model that is individually on cooldown when building the fallback list", async () => {
-    getModelStatsMock.mockResolvedValue(
-      new Map([["model-b:free", { avgMs: undefined, rateLimitedUntil: new Date(Date.now() + 60_000) }]]),
-    );
-    createMock
-      .mockRejectedValueOnce(new OpenAI.APIError(429, undefined, "rate limited", undefined))
-      .mockResolvedValueOnce(completion("paid picked up the slack", 8));
-
-    const result = await generatePage(levers);
-
-    expect(result.model).toBe("model-paid:paid");
-    expect(createMock).toHaveBeenCalledTimes(2);
-    expect(createMock.mock.calls[1][0]).toMatchObject({ model: "model-paid:paid" });
+    expect(rows[0]?.health).toBe("cooling");
+    expect(rows[0]?.cooling_until.getTime()).toBeGreaterThan(Date.now());
   });
 });
 
 describe("chooseLevers", () => {
-  it("prefers the paid model when the account-wide free-cap cooldown is active", async () => {
-    getModelStatsMock.mockResolvedValue(
-      new Map([[FREE_TIER_KEY, { avgMs: undefined, rateLimitedUntil: new Date(Date.now() + 60_000) }]]),
+  it("only ever picks an eligible (enabled) model", async () => {
+    await query(
+      "UPDATE model_registry SET enabled = false WHERE slug = 'model-b' AND task = 'generation'",
     );
+    for (let i = 0; i < 20; i++) {
+      const result = await chooseLevers();
+      expect(result.model).toBe("model-a");
+    }
+  });
 
+  it("applies book-mode overrides (locked form/variant/neighbors)", async () => {
+    const result = await chooseLevers({
+      form: "a prayer",
+      promptVariant: "book-v1",
+      prev: "prev text",
+      next: "next text",
+    });
+    expect(result.form).toBe("a prayer");
+    expect(result.promptVariant).toBe("book-v1");
+    expect(result.prev).toBe("prev text");
+    expect(result.next).toBe("next text");
+  });
+
+  it("defaults to a random form and the base-v2 variant with no overrides", async () => {
     const result = await chooseLevers();
-    expect(result.model).toBe("model-paid:paid");
-  });
-
-  it("falls back to the paid model when every free pool model is individually on cooldown", async () => {
-    const future = new Date(Date.now() + 60_000);
-    getModelStatsMock.mockResolvedValue(
-      new Map([
-        ["model-a:free", { avgMs: undefined, rateLimitedUntil: future }],
-        ["model-b:free", { avgMs: undefined, rateLimitedUntil: future }],
-      ]),
-    );
-
-    const result = await chooseLevers();
-    expect(result.model).toBe("model-paid:paid");
-  });
-
-  it("latency-weighted pick strongly favors the faster free model over many trials", async () => {
-    getModelStatsMock.mockResolvedValue(
-      new Map([
-        ["model-a:free", { avgMs: 50, rateLimitedUntil: undefined }],
-        ["model-b:free", { avgMs: 5000, rateLimitedUntil: undefined }],
-      ]),
-    );
-
-    const picks = await Promise.all(Array.from({ length: 200 }, () => chooseLevers()));
-    const countA = picks.filter((l) => l.model === "model-a:free").length;
-    const countB = picks.filter((l) => l.model === "model-b:free").length;
-
-    // 1/50 vs 1/5000 weighting is a ~100:1 tilt — a 5:1 threshold leaves no
-    // realistic flakiness while still proving the weighting is in effect.
-    expect(countA).toBeGreaterThan(countB * 5);
-  });
-
-  it("still samples a model with no latency data yet at a neutral weight", async () => {
-    // model-a has data, model-b has none — model-b should not be starved out.
-    getModelStatsMock.mockResolvedValue(
-      new Map([["model-a:free", { avgMs: 5000, rateLimitedUntil: undefined }]]),
-    );
-
-    const picks = await Promise.all(Array.from({ length: 200 }, () => chooseLevers()));
-    const countB = picks.filter((l) => l.model === "model-b:free").length;
-
-    expect(countB).toBeGreaterThan(0);
+    expect(result.promptVariant).toBe("base-v2");
+    expect(result.form).toBeTruthy();
+    expect(result.prev).toBeUndefined();
+    expect(result.next).toBeUndefined();
   });
 });
