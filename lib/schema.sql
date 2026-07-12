@@ -241,3 +241,80 @@ SELECT
   round(percentile_cont(0.5) WITHIN GROUP (ORDER BY dwell_ms))::int     AS median_dwell_ms
 FROM engagement
 GROUP BY arrived_via;
+
+-- Per-model performance telemetry (lib/modelStats.ts, docs/architecture.md §6/§10).
+-- Narrowed role vs. the original prototype: pure latency telemetry (avgMs, used as
+-- a bounded tiebreak within model_registry's configured weights, lib/registry.ts)
+-- plus the account-wide OpenRouter `free-models-per-day` cooldown, kept on its own
+-- sentinel row ('__free_tier__', lib/modelStats.ts FREE_TIER_KEY) since that 429
+-- flavor caps every :free model at once. Per-model health/cooldown now lives on
+-- model_registry (cooling/unavailable, §7 below) — rate_limited_until here is only
+-- ever set for the free-tier sentinel. Recording is fire-and-forget: a stats-table
+-- hiccup must never break or slow a real generation/moderation call.
+CREATE TABLE IF NOT EXISTS model_stats (
+  model              TEXT PRIMARY KEY,          -- model id, or the '__free_tier__' sentinel
+  calls              BIGINT NOT NULL DEFAULT 0, -- successful sampled completions
+  total_ms           BIGINT NOT NULL DEFAULT 0, -- Σ duration; avg = total_ms / calls
+  errors             BIGINT NOT NULL DEFAULT 0, -- failed attempts (any error)
+  rate_limited_until TIMESTAMPTZ,               -- skip this model while now() < this
+  last_used_at       TIMESTAMPTZ
+);
+
+-- Model pool registry (docs/architecture.md §6/§7, model-pool rework). Each
+-- row is one model's config for ONE task — the composite PK is the whole
+-- point, since the same model needs opposite settings depending on the job
+-- (Claude Haiku 4.5 holds both a generation row — temp 0.9, weighted lottery,
+-- variety is the point — and a moderation row — temp 0, fixed chain position,
+-- no variety at all). lib/registry.ts is the only reader/writer; selection
+-- (poolFor) filters to enabled rows whose provider key is configured
+-- (lib/providers.ts) and whose health allows it.
+CREATE TABLE IF NOT EXISTS model_registry (
+  slug              TEXT NOT NULL,               -- provider's model id
+  provider          TEXT NOT NULL,               -- 'openrouter' | 'google'
+  task              TEXT NOT NULL,               -- 'generation' | 'moderation'
+  enabled           BOOLEAN NOT NULL DEFAULT true,
+  weight            INTEGER NOT NULL DEFAULT 0,  -- generation only: weighted-lottery share
+  "order"           INTEGER NOT NULL DEFAULT 0,  -- moderation only: chain position
+  temperature       REAL NOT NULL DEFAULT 0,
+  max_tokens        INTEGER NOT NULL DEFAULT 1000,
+  reasoning_enabled BOOLEAN NOT NULL DEFAULT false,
+  health            TEXT NOT NULL DEFAULT 'ok',  -- 'ok' | 'cooling' | 'unavailable'
+  cooling_until     TIMESTAMPTZ,                 -- 'cooling' only: skip while now() < this
+  PRIMARY KEY (slug, task)
+);
+
+-- Seed the pool. ON CONFLICT DO NOTHING makes this idempotent and
+-- override-friendly — an operator's manual UPDATE (e.g. flipping `enabled`
+-- or `health` by hand) survives a re-run of this file.
+
+-- Generation pool: temp 0.9 (the existing per-page jitter, config.ts, still
+-- applies on top), max_tokens 1000, reasoning off. Weighted lottery
+-- (lib/registry.ts chooseGenerationModel). Slugs verified against OpenRouter's
+-- live GET /api/v1/models catalog (2026-07-12) except the two Google rows,
+-- marked below.
+INSERT INTO model_registry (slug, provider, task, enabled, weight, temperature, max_tokens, reasoning_enabled) VALUES
+  ('deepseek/deepseek-v4-flash',     'openrouter', 'generation', true,  20, 0.9, 1000, false),
+  ('moonshotai/kimi-k2.6',           'openrouter', 'generation', true,  20, 0.9, 1000, false),
+  ('z-ai/glm-5.2',                   'openrouter', 'generation', true,  20, 0.9, 1000, false),
+  ('anthropic/claude-haiku-4.5',     'openrouter', 'generation', true,  20, 0.9, 1000, false),
+  ('mistralai/mistral-large-2512',   'openrouter', 'generation', true,  10, 0.9, 1000, false),
+  -- Gemini 3 Flash: slug UNVERIFIED against Google's native /v1beta/openai/models
+  -- catalog (no GOOGLE_API_KEY was available at seed time) — seeded disabled
+  -- pending live resolution (docs/architecture.md §6, model-pool rework §1/§5).
+  -- Flip `enabled` true once the slug is confirmed.
+  ('gemini-3-flash',                 'google',     'generation', false, 10, 0.9, 1000, false),
+  ('anthropic/claude-sonnet-5',      'openrouter', 'generation', false, 0,  0.9, 1000, false),
+  ('anthropic/claude-opus-4.8',      'openrouter', 'generation', false, 0,  0.9, 1000, false)
+ON CONFLICT (slug, task) DO NOTHING;
+
+-- Moderation chain: temp 0, max_tokens 5, reasoning off, no variety by design
+-- (docs/architecture.md §7 — an extra chain link is another chance to
+-- wrongly FAIL benign-but-dark content). Walked in `order`
+-- (lib/registry.ts moderationChain) until a clear PASS/FAIL.
+INSERT INTO model_registry (slug, provider, task, enabled, "order", temperature, max_tokens, reasoning_enabled) VALUES
+  -- Gemini 3.1 Flash-Lite: same UNVERIFIED-slug caveat as the generation row
+  -- above; also seeded disabled pending live resolution. Until then,
+  -- moderation runs Haiku-only (order 2 promotes to the sole active model).
+  ('gemini-3.1-flash-lite',      'google',     'moderation', false, 1, 0, 5, false),
+  ('anthropic/claude-haiku-4.5', 'openrouter', 'moderation', true,  2, 0, 5, false)
+ON CONFLICT (slug, task) DO NOTHING;

@@ -4,6 +4,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 vi.hoisted(() => {
   process.env.DATABASE_URL =
     process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/noumenon_test";
+  // chooseLevers() stays real (below), so it needs a real, eligible
+  // model_registry row to pick from (lib/registry.ts) — seeded in beforeAll.
+  process.env.OPENROUTER_API_KEY = "test-key";
 });
 
 // Mock only the LLM call; keep chooseLevers real so provenance is genuine.
@@ -32,11 +35,32 @@ const moderateMock = vi.mocked(moderate);
 const monitorMock = vi.mocked(monitor);
 const ADDR = "pipe/1/1/1/1";
 
-/** generatePage now returns text + usage; 100 tokens per call for accounting. */
-const gen = (text: string) => ({ text, usage: { tokens: 100, costUsd: 0 } });
+/**
+ * generatePage now returns text + model + provider + usage; 100 tokens per
+ * call for accounting. `model` defaults to a fixed id since these tests mock
+ * generatePage directly — the real fallback behavior is covered in
+ * generate.test.ts.
+ */
+const gen = (text: string, model = "mock-model") => ({
+  text,
+  model,
+  provider: "openrouter" as const,
+  usage: { tokens: 100, costUsd: 0 },
+});
 
 beforeAll(async () => {
   await query(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
+  // chooseLevers() is real in this suite — one eligible generation row is
+  // all it needs (its own selection logic is covered in registry.test.ts /
+  // generate.test.ts).
+  // ON CONFLICT DO NOTHING: several test files seed this same row into the
+  // shared test database (fileParallelism: false runs them sequentially, not
+  // isolated), so this must be idempotent regardless of run order.
+  await query(
+    `INSERT INTO model_registry (slug, provider, task, enabled, weight, temperature, max_tokens)
+     VALUES ('mock-model', 'openrouter', 'generation', true, 10, 0.9, 1000)
+     ON CONFLICT (slug, task) DO NOTHING`,
+  );
 });
 
 beforeEach(async () => {
@@ -139,6 +163,17 @@ describe("generatePipeline", () => {
 
     await generatePipeline(ADDR);
     expect(generateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the model that actually answered, even if generatePage fell back", async () => {
+    // generatePage() (lib/generate.ts) can fall back to a different pool
+    // model on a retryable error; its result.model may differ from the
+    // model chooseLevers() requested. Provenance must reflect the former.
+    generateMock.mockResolvedValue(gen("a unique page", "fallback-model:free"));
+
+    const result = await generatePipeline(ADDR);
+
+    expect(result.provenance.model).toBe("fallback-model:free");
   });
 });
 

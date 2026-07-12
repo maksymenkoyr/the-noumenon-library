@@ -9,6 +9,10 @@ vi.hoisted(() => {
   process.env.WAIT_POLL_INTERVAL_MS = "50";
   // The whole point of this suite: the books experiment switched on.
   process.env.BOOK_MODE = "true";
+  // chooseLevers() (page content) and maybeTitleBook/condensePage (aux calls)
+  // all draw from the real model_registry pool (lib/registry.ts) in this
+  // suite — needs a configured provider key to be eligible.
+  process.env.OPENROUTER_API_KEY = "test-key";
 });
 
 // Mock only the page-writing LLM call; chooseLevers stays real so the locked
@@ -22,14 +26,16 @@ vi.mock("./moderate", () => ({
 }));
 vi.mock("./monitor", () => ({ monitor: vi.fn() }));
 
-// The aux LLM calls (condense middle, title/tags) go through openrouter
-// directly; page content in this suite is kept short so condensation never
-// needs the LLM and createMock serves title/tags alone (except where a test
-// says otherwise).
+// The aux LLM calls (condense middle, title/tags) go through the real
+// model_registry pool + provider client (lib/registry.ts, lib/providers.ts);
+// page content in this suite is kept short so condensation never needs the
+// LLM and createMock serves title/tags alone (except where a test says
+// otherwise).
 const createMock = vi.fn();
-vi.mock("./openrouter", () => ({
-  getOpenRouter: () => ({ chat: { completions: { create: createMock } } }),
-}));
+vi.mock("./providers", async () => {
+  const actual = await vi.importActual<typeof import("./providers")>("./providers");
+  return { ...actual, getClient: () => ({ chat: { completions: { create: createMock } } }) };
+});
 
 import { closePool, query } from "./db";
 import { generatePage } from "./generate";
@@ -41,7 +47,12 @@ const generateMock = vi.mocked(generatePage);
 const monitorMock = vi.mocked(monitor);
 
 /** generatePage result: text + usage. */
-const gen = (text: string) => ({ text, usage: { tokens: 100, costUsd: 0 } });
+const gen = (text: string) => ({
+  text,
+  model: "mock-model",
+  provider: "openrouter" as const,
+  usage: { tokens: 100, costUsd: 0 },
+});
 
 /** A fake title/tags completion. */
 const metadataReply = (content: string) => ({
@@ -53,6 +64,17 @@ const GOOD_METADATA = "TITLE: The Salt Ledger\nTAGS: sea, debt, weather";
 
 beforeAll(async () => {
   await query(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
+  // chooseLevers() (page content) and the aux calls (title/tags, condense)
+  // all draw from the real model_registry pool — one eligible row suffices;
+  // its own selection logic is covered in registry.test.ts / generate.test.ts.
+  // ON CONFLICT DO NOTHING: several test files seed this same row into the
+  // shared test database (fileParallelism: false runs them sequentially, not
+  // isolated), so this must be idempotent regardless of run order.
+  await query(
+    `INSERT INTO model_registry (slug, provider, task, enabled, weight, temperature, max_tokens)
+     VALUES ('mock-model', 'openrouter', 'generation', true, 10, 0.9, 1000)
+     ON CONFLICT (slug, task) DO NOTHING`,
+  );
 });
 
 beforeEach(async () => {

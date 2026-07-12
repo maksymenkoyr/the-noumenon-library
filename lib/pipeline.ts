@@ -58,20 +58,27 @@ export async function generatePipeline(
 
   // Accumulate the cost of every generation call, including retries below.
   const usage: GenerationUsage = { tokens: 0, costUsd: 0 };
+  // Runs generation for the given levers, folds in usage, and — since
+  // generatePage() may fall back to a different pool model on a retryable
+  // error — updates `levers.model`/`levers.provider` in place so provenance
+  // always names the model that actually produced the content, not just the
+  // one requested.
   const run = async (l: GenerationLevers): Promise<string> => {
     const result = await generatePage(l);
     usage.tokens += result.usage.tokens;
     usage.costUsd += result.usage.costUsd;
+    l.model = result.model;
+    l.provider = result.provider;
     return result.text;
   };
 
   // Track levers alongside content so provenance always matches what we commit.
-  let levers = chooseLevers(overrides);
+  let levers = await chooseLevers(overrides);
   let content = await run(levers);
 
   if (!(await moderate(content)).ok) {
     // Moderation fail → regenerate once with fresh levers (architecture §7).
-    levers = chooseLevers(overrides);
+    levers = await chooseLevers(overrides);
     content = await run(levers);
     if (!(await moderate(content)).ok) {
       // Two rejects in a row. We never store failing content, but we no longer
@@ -88,7 +95,7 @@ export async function generatePipeline(
   // replace the already-passed content; otherwise keep the original (near-
   // duplicates are allowed by design — no dark-shelving for a mere collision).
   if (await contentExistsElsewhere(hashContent(content), address)) {
-    const dedupLevers = chooseLevers(overrides);
+    const dedupLevers = await chooseLevers(overrides);
     const dedupContent = await run(dedupLevers);
     if ((await moderate(dedupContent)).ok) {
       levers = dedupLevers;

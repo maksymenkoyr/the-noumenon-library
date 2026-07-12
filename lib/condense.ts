@@ -1,8 +1,10 @@
 import { config } from "./config";
 import type { GenerationUsage } from "./economics";
 import { devLog } from "./log";
-import { getOpenRouter } from "./openrouter";
+import { getModelStats } from "./modelStats";
+import { getClient, reasoningParams } from "./providers";
 import { buildCondenseMiddlePrompt } from "./prompts";
+import { chooseGenerationModel } from "./registry";
 
 /**
  * Reverse-bell-curve condensation (docs/books.md). A page's condensed form
@@ -105,10 +107,6 @@ export function assembleCondensed(
     .join("\n…\n");
 }
 
-function pick<T>(pool: readonly T[]): T {
-  return pool[Math.floor(Math.random() * pool.length)];
-}
-
 /**
  * Condense a committed page for use as neighbor context. Never throws.
  * A middle below config.condenseMinMiddleWords is kept as-is (the page is
@@ -125,11 +123,15 @@ export async function condensePage(content: string): Promise<CondenseResult> {
   }
 
   try {
-    const model = pick(config.generationModels);
-    const response = await getOpenRouter().chat.completions.create({
-      model,
+    // Draws from the same weighted generation pool as page content (lib/
+    // registry.ts) rather than a bare uniform pick.
+    const chosen = await chooseGenerationModel(await getModelStats());
+    const client = getClient(chosen.provider);
+    if (!client) throw new Error(`No client for provider: ${chosen.provider}`);
+    const response = await client.chat.completions.create({
+      model: chosen.slug,
       temperature: 0.2,
-      // Cost backstop only; generous because reasoning tokens count (config.ts).
+      // Cost backstop only.
       max_tokens: config.maxTokens,
       messages: [
         {
@@ -140,10 +142,11 @@ export async function condensePage(content: string): Promise<CondenseResult> {
           ),
         },
       ],
+      ...reasoningParams(chosen.provider),
     });
     const tokens = response.usage?.total_tokens ?? 0;
     usage.tokens += tokens;
-    usage.costUsd += (tokens / 1_000_000) * (config.modelPrices[model] ?? 0);
+    usage.costUsd += (tokens / 1_000_000) * (config.modelPrices[chosen.slug] ?? 0);
 
     const summary = response.choices[0]?.message.content?.trim() ?? "";
     if (summary) {

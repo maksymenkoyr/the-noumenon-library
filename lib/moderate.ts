@@ -1,19 +1,24 @@
-import { config, type ModerationModel, type ModerationPolicy } from "./config";
+import { config } from "./config";
 import { devLog } from "./log";
 import { monitor } from "./monitor";
-import { getOpenRouter } from "./openrouter";
+import { cooldownSeconds, errorStatus, getClient, reasoningParams } from "./providers";
+import { markCooling, markHealthy, markUnavailable, moderationChain, type RegistryRow } from "./registry";
 
 /**
  * Moderation (docs/architecture.md §7, legal.md). The safety gate before a page
  * is stored: never store narrow illegal content. **No aesthetic filtering** —
  * darkness and strangeness are features.
  *
- * A pool of free models (mixed deterministic/non, config.moderationModels) is
- * run in parallel; each returns PASS / FAIL / abstain. The combined verdict
- * follows config.moderationPolicy. If every model abstains the result is
- * undetermined and we throw — the caller releases the reservation and the
- * address is retried later, so unmoderated content is never stored and a
- * transient outage never permanently dark-shelves a page.
+ * A short, curated CHAIN of models (model_registry, task='moderation', ordered
+ * by `order` — lib/registry.ts moderationChain()) is walked in order until one
+ * returns a clear PASS/FAIL; an abstain or an error just moves to the next
+ * link. This is deliberately NOT a parallel any-fail pool: every extra voter
+ * is another chance to wrongly FAIL benign-but-dark content, over-blocking it
+ * against the "darkness is a feature" ethos. If every model in the chain
+ * abstains or errors, the result is undetermined and we throw — the caller
+ * releases the reservation and the address is retried later, so unmoderated
+ * content is never stored and a transient outage never permanently
+ * dark-shelves a page.
  */
 
 export interface ModerationResult {
@@ -60,40 +65,37 @@ function parseVerdict(reply: string | null | undefined): Verdict {
   return hasFail ? "fail" : "pass";
 }
 
-async function classify(
-  entry: ModerationModel,
-  text: string,
-): Promise<Verdict> {
-  const response = await getOpenRouter().chat.completions.create({
-    model: entry.model,
-    temperature: entry.temperature,
-    max_tokens: config.moderationMaxTokens,
+async function classify(row: RegistryRow, text: string): Promise<Verdict> {
+  const client = getClient(row.provider);
+  if (!client) {
+    // Shouldn't happen — moderationChain() already filters to providers with
+    // a configured key — but stay defensive rather than crash the request.
+    return "abstain";
+  }
+  const response = await client.chat.completions.create({
+    model: row.slug,
+    temperature: row.temperature,
+    max_tokens: row.maxTokens,
     messages: [
       { role: "system", content: MODERATION_PROMPT },
       { role: "user", content: text },
     ],
+    ...reasoningParams(row.provider),
   });
   return parseVerdict(response.choices[0]?.message.content);
 }
 
-/**
- * Combine decided (non-abstain) verdicts into a pass/fail per policy. Pure and
- * exported for testing. Callers must pass at least one decided verdict.
- */
-export function combineVerdicts(
-  verdicts: Verdict[],
-  policy: ModerationPolicy,
-): ModerationResult {
-  const fails = verdicts.filter((v) => v === "fail").length;
-  const passes = verdicts.filter((v) => v === "pass").length;
-
-  switch (policy) {
-    case "any-fail":
-      return { ok: fails === 0 };
-    case "unanimous-fail":
-      return { ok: passes > 0 };
-    case "majority":
-      return { ok: passes >= fails };
+/** Mark health on a chain link's failure — same transitions as generation. */
+function markFailure(row: RegistryRow, err: unknown): void {
+  const status = errorStatus(err);
+  if (status === 404) {
+    void markUnavailable(row.slug, "moderation");
+  } else if (status === 429 || status === undefined || status >= 500) {
+    void markCooling(
+      row.slug,
+      "moderation",
+      new Date(Date.now() + cooldownSeconds(err) * 1000),
+    );
   }
 }
 
@@ -117,33 +119,32 @@ export async function moderate(text: string): Promise<ModerationResult> {
     return { ok: true };
   }
 
-  const results = await Promise.allSettled(
-    config.moderationModels.map((entry) => classify(entry, text)),
-  );
-
-  const verdicts: Verdict[] = [];
-  results.forEach((result, i) => {
-    const entry = config.moderationModels[i];
-    if (result.status === "fulfilled") {
-      verdicts.push(result.value);
+  const chain = await moderationChain();
+  // An empty chain (misconfigured registry, every provider key missing, or
+  // every model unavailable/cooling) falls straight through the loop below
+  // and hits the same "undetermined" throw as every model abstaining.
+  for (const row of chain) {
+    let verdict: Verdict;
+    try {
+      verdict = await classify(row, text);
+      void markHealthy(row.slug, "moderation");
+    } catch (err) {
       devLog(
-        `moderate ${entry.model} temp=${entry.temperature} → ${result.value}`,
+        `moderate ${row.slug} → error (abstain):`,
+        err instanceof Error ? err.message : String(err),
       );
-    } else {
-      devLog(
-        `moderate ${entry.model} temp=${entry.temperature} → error (abstain):`,
-        result.reason instanceof Error ? result.reason.message : result.reason,
-      );
+      markFailure(row, err);
+      continue; // error → next link in the chain
     }
-  });
 
-  const decided = verdicts.filter((v) => v !== "abstain");
-  if (decided.length === 0) {
-    // Undetermined — no model gave a usable verdict. Do not store; retry later.
-    throw new Error("Moderation undetermined: no model returned a verdict");
+    devLog(`moderate ${row.slug} temp=${row.temperature} → ${verdict}`);
+    if (verdict === "abstain") continue; // unclear reply → next link
+
+    devLog(`moderate decision=${verdict === "pass" ? "PASS" : "FAIL"} (model=${row.slug})`);
+    return { ok: verdict === "pass" };
   }
 
-  const result = combineVerdicts(decided, config.moderationPolicy);
-  devLog(`moderate decision=${result.ok ? "PASS" : "FAIL"} (policy=${config.moderationPolicy})`);
-  return result;
+  // Every link in the chain abstained, errored, or the chain was empty —
+  // undetermined. Do not store; retry later.
+  throw new Error("Moderation undetermined: no model returned a verdict");
 }
