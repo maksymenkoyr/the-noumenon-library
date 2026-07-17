@@ -29,7 +29,7 @@ import {
 } from "./store";
 
 /**
- * Book orchestration for the books experiment (docs/books.md): the one module
+ * Book orchestration for the books experiment (docs/reference/books.md): the one module
  * that knows the whole story — volume = book, a form locked at book creation,
  * neighbor continuity via condensed committed pages, and title/tags invented
  * from the first committed page. pipeline.ts and resolvePage.ts stay thin.

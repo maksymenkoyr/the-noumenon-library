@@ -9,7 +9,7 @@ import {
 } from "@/lib/engagement";
 
 /**
- * Press / un-press a leaf (docs/architecture.md §8, Phase 10). The app's per-
+ * Press / un-press a leaf (docs/reference/architecture.md §8, Phase 10). The app's per-
  * reader state lives in the browser (localStorage); this endpoint only keeps the
  * anonymous aggregate count. Idempotency is the client's job — it sends a press
  * only on an actual toggle — so a hashed-IP throttle is all the abuse guard the

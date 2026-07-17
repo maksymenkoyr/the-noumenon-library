@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { PRESS_EVENT, pressedKey } from "@/lib/pressed";
 
 /**
- * Reader marks for a crystallized leaf (docs/architecture.md §8, Phase 10):
+ * Reader marks for a crystallized leaf (docs/reference/architecture.md §8, Phase 10):
  *
  *  - A "press" gesture — a page is a leaf; you press it the way you'd press a
  *    flower to keep it. Per-reader state lives in localStorage (no accounts); the

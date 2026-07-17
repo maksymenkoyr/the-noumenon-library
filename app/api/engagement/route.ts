@@ -8,7 +8,7 @@ import {
 } from "@/lib/engagement";
 
 /**
- * Dwell-time beacon (docs/architecture.md §8, Phase 10). Sent via
+ * Dwell-time beacon (docs/reference/architecture.md §8, Phase 10). Sent via
  * navigator.sendBeacon on page-hide, so the body arrives as text/plain (a
  * Beacon Blob) rather than application/json — parse the raw text ourselves. Fire-
  * and-forget: the client never reads the response, so we always 204 and swallow

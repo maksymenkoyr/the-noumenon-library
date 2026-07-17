@@ -3,7 +3,7 @@ import { devLog } from "./log";
 
 /**
  * Per-model performance telemetry (lib/schema.sql `model_stats`,
- * docs/architecture.md §6/§10). Fed by both lib/generate.ts and lib/moderate.ts
+ * docs/reference/architecture.md §6/§10). Fed by both lib/generate.ts and lib/moderate.ts
  * so free-vs-paid selection is data-driven: average latency down-weights slow
  * free models, and a rate-limit cooldown parks a model that just errored.
  *

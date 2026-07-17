@@ -1,7 +1,7 @@
 import { query } from "./db";
 
 /**
- * Typed readers over the insight views (lib/schema.sql, docs/architecture.md
+ * Typed readers over the insight views (lib/schema.sql, docs/reference/architecture.md
  * §8 "Both": SQL views as source of truth). Rendered on /operator. Each
  * reader is a single query() against its view — the rollup logic lives in SQL,
  * not here.

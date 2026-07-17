@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 
 /**
- * Best-effort client IP for rate-limit keying (docs/architecture.md §10, §12).
+ * Best-effort client IP for rate-limit keying (docs/reference/architecture.md §10, §12).
  * Lives in the app/request layer so resolvePage stays framework-free and unit
  * testable; the raw IP is hashed before it touches the store (lib/economics.ts).
  *

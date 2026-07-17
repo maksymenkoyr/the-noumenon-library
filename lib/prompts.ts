@@ -1,5 +1,5 @@
 /**
- * Prompt variants — the prompt-variation entropy lever (docs/generation.md).
+ * Prompt variants — the prompt-variation entropy lever (docs/reference/generation.md).
  *
  * The generation prompt is the highest-leverage artifact in the project. The
  * model is framed as a *transcriber* of a text found in the library, never as
@@ -12,7 +12,7 @@
  * variety lever while model rotation is pinned to a single model.
  *
  * The text is still framed as *found*, not written to order (frees the model
- * from intentionality); anti-patterns in docs/generation.md are respected. The
+ * from intentionality); anti-patterns in docs/reference/generation.md are respected. The
  * chosen variant id and form are logged per page as provenance (the form in the
  * reserved `seed_word` column).
  */
@@ -20,11 +20,11 @@
 export interface PromptContext {
   maxWords: number;
   form: string;
-  // Books experiment (docs/books.md): condensed neighbor pages in the same
+  // Books experiment (docs/reference/books.md): condensed neighbor pages in the same
   // volume, present only when already committed. Their first/last sentences
   // are near-verbatim (lib/condense.ts), so the seam constraint the model
   // must satisfy is concrete text, not a vibe. Never coordinates — the
-  // address stays out of the prompt (docs/generation.md).
+  // address stays out of the prompt (docs/reference/generation.md).
   prev?: string;
   next?: string;
 }
@@ -72,7 +72,7 @@ export const GENERATION_FORMS: readonly string[] = [
 ];
 
 /**
- * Books experiment (docs/books.md): the volume is a book with a locked form,
+ * Books experiment (docs/reference/books.md): the volume is a book with a locked form,
  * and a page connects to its committed neighbors via their condensed text.
  * Four cases, one variant slug (the case is recoverable from which neighbors
  * existed at generation time). The self-narration lessons hold throughout:

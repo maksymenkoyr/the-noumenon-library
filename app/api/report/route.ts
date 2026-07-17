@@ -13,7 +13,7 @@ import { recordReport } from "@/lib/reports";
  * once the response has flushed (a bare floating promise can be killed when a
  * serverless response ends), and only for the first open report on an address
  * so a hot page can't flood the inbox. Same admission as the other reader
- * signals: hashed-IP throttle, no identifiers stored (docs/legal.md).
+ * signals: hashed-IP throttle, no identifiers stored (docs/reference/legal.md).
  */
 export const runtime = "nodejs";
 

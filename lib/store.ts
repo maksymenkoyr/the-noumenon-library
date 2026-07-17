@@ -3,7 +3,7 @@ import { config } from "./config";
 import { query } from "./db";
 
 /**
- * The page store: generate-once, store-forever (docs/architecture.md §2–§3, §8).
+ * The page store: generate-once, store-forever (docs/reference/architecture.md §2–§3, §8).
  * All functions key on the canonical normalized address (lib/address.ts).
  */
 
@@ -20,7 +20,7 @@ export interface PageRow {
   seed_word: string | null;
   created_at: Date;
   committed_at: Date | null;
-  // Reverse-bell-curve digest for neighbor context (docs/books.md); NULL for
+  // Reverse-bell-curve digest for neighbor context (docs/reference/books.md); NULL for
   // pre-book-mode pages until condensed lazily on first neighbor read.
   condensed: string | null;
 }
@@ -30,11 +30,11 @@ export interface PageProvenance {
   prompt_variant?: string;
   temperature?: number;
   // The chosen form/register lever, stored in the reserved seed_word column
-  // (docs/generation.md, architecture §8) — a seed-like input, revived.
+  // (docs/reference/generation.md, architecture §8) — a seed-like input, revived.
   seed_word?: string;
 }
 
-/** SHA-256 of page content — the dedup key (docs/architecture.md §8). */
+/** SHA-256 of page content — the dedup key (docs/reference/architecture.md §8). */
 export function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
@@ -104,7 +104,7 @@ export async function commitPage(
   provenance: PageProvenance,
 ): Promise<void> {
   const contentHash = hashContent(content);
-  // seed_word now carries the form/register lever (docs/generation.md); it stays
+  // seed_word now carries the form/register lever (docs/reference/generation.md); it stays
   // nullable, so callers that don't set it (e.g. tests) simply leave it null.
   await query(
     `UPDATE pages SET
@@ -130,7 +130,7 @@ export async function commitPage(
 }
 
 /**
- * Reactive takedown (docs/legal.md): blank an address by report. Upserts so it
+ * Reactive takedown (docs/reference/legal.md): blank an address by report. Upserts so it
  * works whether or not the page was ever generated (enabling pre-emptive
  * blocks). The content stops being served immediately and never regenerates.
  */
@@ -159,7 +159,7 @@ export async function releaseReservation(address: string): Promise<void> {
   );
 }
 
-// --- Books experiment (docs/books.md): volume = book -----------------------
+// --- Books experiment (docs/reference/books.md): volume = book -----------------------
 
 export interface BookRow {
   volume_key: string;

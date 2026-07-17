@@ -5,7 +5,7 @@ import { monitor } from "./monitor";
 import { providerAvailable, type Provider } from "./providers";
 
 /**
- * The model pool registry (docs/architecture.md §6/§7, model-pool rework).
+ * The model pool registry (docs/reference/architecture.md §6/§7, model-pool rework).
  * `model_registry` (lib/schema.sql) is keyed `(slug, task)` — the same model
  * can hold opposite-settings rows for `generation` (temp 0.9, weighted
  * lottery, variety is the point) and `moderation` (temp 0, fixed chain, no
@@ -144,7 +144,7 @@ export async function moderationChain(): Promise<RegistryRow[]> {
 
 /**
  * Park a model (for one task) so selection skips it until `until` passes — a
- * 429 that will come back (docs/architecture.md §7). Non-throwing: a
+ * 429 that will come back (docs/reference/architecture.md §7). Non-throwing: a
  * registry-table hiccup must never break or slow a real generation/moderation
  * call, same posture as lib/modelStats.ts.
  */

@@ -44,7 +44,7 @@ export async function generatePipeline(
   address: string,
   bookCtx?: BookContext,
 ): Promise<PipelineResult> {
-  // Book mode (docs/books.md) pins the book's locked form, the book variant,
+  // Book mode (docs/reference/books.md) pins the book's locked form, the book variant,
   // and the neighbor seams on EVERY attempt — including the moderation and
   // dedup regenerations below — so a retry can't fall out of the book's voice.
   const overrides: LeverOverrides = bookCtx

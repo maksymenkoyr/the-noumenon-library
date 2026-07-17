@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { config } from "./config";
 
 /**
- * Provider abstraction (docs/architecture.md §6, model-pool rework). Both
+ * Provider abstraction (docs/reference/architecture.md §6, model-pool rework). Both
  * providers speak the OpenAI-compatible chat-completions API, so one SDK
  * serves both — only the baseURL and key differ, keyed off `model_registry
  * .provider` (lib/registry.ts). A provider whose key is unset is simply left
@@ -60,7 +60,7 @@ export function getClient(provider: Provider): OpenAI | undefined {
 }
 
 /**
- * Reasoning is off for every call (docs/generation.md, model-pool rework §4)
+ * Reasoning is off for every call (docs/reference/generation.md, model-pool rework §4)
  * — reasoning tokens are pure cost and latency for a page of prose; they're
  * the whole reason GENERATION_MAX_TOKENS used to need to be 4000 and
  * STALE_RESERVATION_SECONDS 300. The two providers spell "off" differently:
@@ -88,7 +88,7 @@ const BASE_COOLDOWN_SECONDS = 30;
 const MAX_COOLDOWN_SECONDS = 15 * 60;
 
 /**
- * Seconds to cool a model down after a 429 (docs/architecture.md §7 of the
+ * Seconds to cool a model down after a 429 (docs/reference/architecture.md §7 of the
  * model-pool rework — "honour Retry-After ... where the provider sends them;
  * otherwise capped exponential backoff"). `attempt` is an optional hint from
  * the caller (0-indexed count of consecutive failures it has already seen for

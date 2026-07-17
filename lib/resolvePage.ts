@@ -50,7 +50,7 @@ const EXPLORE_ONLY_PLACEHOLDER =
 
 /**
  * Resolve the page at a canonical address — the heart of the system
- * (docs/architecture.md §2): lookup → reserve → generate → moderate → commit.
+ * (docs/reference/architecture.md §2): lookup → reserve → generate → moderate → commit.
  * Generate-once, store-forever: revisits never touch the LLM, and N concurrent
  * first-visitors trigger exactly one generation (§3).
  *
@@ -113,7 +113,7 @@ async function generateAndCommit(
 
   try {
     const startedAt = Date.now();
-    // Books experiment (docs/books.md): resolve the book row + condensed
+    // Books experiment (docs/reference/books.md): resolve the book row + condensed
     // neighbors before generating. Aux LLM cost (lazy neighbor condensation,
     // and the post-commit calls below) accumulates here so recordSpend sees it.
     const auxUsage: GenerationUsage = { tokens: 0, costUsd: 0 };

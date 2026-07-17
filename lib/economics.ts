@@ -5,7 +5,7 @@ import { devLog } from "./log";
 
 /**
  * Economics & safety controls — admission control and the spend counter
- * (docs/architecture.md §10, docs/economics.md). The counter store is Postgres
+ * (docs/reference/architecture.md §10, docs/reference/economics.md). The counter store is Postgres
  * (§10: "fine at this scale"); this module owns the two counter tables
  * (rate_limit_hits, monthly_spend — lib/schema.sql) and nothing page-related.
  *

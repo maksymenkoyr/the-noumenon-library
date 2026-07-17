@@ -5,7 +5,7 @@ import { cooldownSeconds, errorStatus, getClient, reasoningParams } from "./prov
 import { markCooling, markHealthy, markUnavailable, moderationChain, type RegistryRow } from "./registry";
 
 /**
- * Moderation (docs/architecture.md §7, legal.md). The safety gate before a page
+ * Moderation (docs/reference/architecture.md §7, legal.md). The safety gate before a page
  * is stored: never store narrow illegal content. **No aesthetic filtering** —
  * darkness and strangeness are features.
  *
@@ -102,7 +102,7 @@ function markFailure(row: RegistryRow, err: unknown): void {
 export async function moderate(text: string): Promise<ModerationResult> {
   if (!config.moderationEnabled) {
     // Fail-closed in production: never store unmoderated content (architecture
-    // §7 invariant, docs/legal.md). Throwing makes resolvePage release the
+    // §7 invariant, docs/reference/legal.md). Throwing makes resolvePage release the
     // reservation → the page renders explore-only instead of being committed
     // unmoderated. Outside production the disabled state is a local dev unblock
     // (loud one-time warning only). Enabling the pool for real is Phase 9.

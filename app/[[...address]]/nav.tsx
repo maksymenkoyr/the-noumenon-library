@@ -6,7 +6,7 @@ import { formatAddress, normalizeAddress } from "@/lib/address";
 
 /**
  * The library's navigation: the only ways to move are wandering — random, the
- * next adjacent page, or a typed coordinate (docs/experience.md "Navigation
+ * next adjacent page, or a typed coordinate (docs/reference/experience.md "Navigation
  * model"). There is no search; you cannot look something up, only walk.
  *
  * `lib/address.ts` is a pure module (no node imports), so this client component

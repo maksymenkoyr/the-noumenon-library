@@ -3,7 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 
 /**
- * The content-report affordance for a committed leaf (docs/legal.md): a quiet
+ * The content-report affordance for a committed leaf (docs/reference/legal.md): a quiet
  * `report` control that expands to an optional one-line reason, POSTing to
  * /api/report — the row lands in the operator's queue whatever happens to the
  * notification email. The mailto link stays beside it as the manual channel
@@ -11,7 +11,7 @@ import { useState, useSyncExternalStore } from "react";
  *
  * Acknowledged state is remembered per-address in localStorage so a revisit
  * doesn't invite duplicate reports; like every reader mark it's this browser
- * only, nothing identifying is sent (docs/legal.md).
+ * only, nothing identifying is sent (docs/reference/legal.md).
  */
 
 const reportedKey = (address: string) => `noumenon:reported:${address}`;

@@ -9,7 +9,7 @@ import { config } from "./config";
  *
  * On top of the log line, if `MONITOR_WEBHOOK_URL` is set the event is also
  * pushed to a Discord/Slack-compatible webhook for basic alerting
- * (docs/architecture.md §9, Phase 7). Events fired today:
+ * (docs/reference/architecture.md §9, Phase 7). Events fired today:
  *   - `moderation_persistent_reject` (§7) — a page failed moderation twice.
  *   - `generation_failed` — a resolvePage generation attempt threw (provider
  *     error, persistent reject, or commit failure); the address stays dark.

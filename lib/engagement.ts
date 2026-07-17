@@ -5,7 +5,7 @@ import { ipHash } from "./ipHash";
 
 /**
  * Reader signals — the "like"/press count and dwell-time research signal
- * (docs/architecture.md §8, Phase 10). Two storage idioms, both mirroring the
+ * (docs/reference/architecture.md §8, Phase 10). Two storage idioms, both mirroring the
  * economics counter tables: an aggregate per-page counter (page_likes, like
  * monthly_spend) and an append-only event log (engagement, like rate_limit_hits).
  *
@@ -99,7 +99,7 @@ export async function getDislikeCount(address: string): Promise<number> {
  * Record one dwell-time event. `dwellMs` is bounded to a sane range (sub-zero or
  * absurd values are dropped, not stored); `arrivedVia` is best-effort and stored
  * only when it's one of the known values, else NULL. No identifiers — this is
- * aggregate behavioral signal (docs/legal.md).
+ * aggregate behavioral signal (docs/reference/legal.md).
  */
 export async function recordDwell(
   address: string,

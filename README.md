@@ -24,7 +24,7 @@ Copy `.env.example` to `.env.local` and fill in what you need — at minimum
 `DATABASE_URL` and one of `OPENROUTER_API_KEY` / `GOOGLE_API_KEY` (the model
 pool's two providers, `lib/providers.ts`) to generate anything new. Every
 variable is server-only (read in `lib/config.ts`); none are `NEXT_PUBLIC_*`.
-See `docs/architecture.md` §11 for the full annotated list.
+See `docs/reference/architecture.md` §11 for the full annotated list.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 

@@ -1,6 +1,6 @@
 /**
  * Leaf rendering — the page as a fixed-size container holding a variable amount
- * of text (docs/experience.md "The page as a fixed leaf", architecture §6).
+ * of text (docs/reference/experience.md "The page as a fixed leaf", architecture §6).
  *
  * Every state below shares the same `LEAF_HEIGHT` so the layout never shifts as
  * the Suspense fallback swaps for the finished page (the streaming guide's CLS

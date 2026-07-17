@@ -25,10 +25,10 @@ import { chooseGenerationModel, markCooling, markHealthy, markUnavailable, poolF
 
 /**
  * Generation is a pure function of its levers plus model nondeterminism, and
- * every lever is persisted as provenance (docs/architecture.md §6). The page
+ * every lever is persisted as provenance (docs/reference/architecture.md §6). The page
  * is given no address and no seed word, so the prompt is identical for every
  * page — variety comes from the model's sampling and from rotating across a
- * pool of models (the "different gravity wells" lever, docs/generation.md).
+ * pool of models (the "different gravity wells" lever, docs/reference/generation.md).
  * Model selection itself lives in lib/registry.ts (model_registry, weighted
  * lottery); this module owns the levers, the prompt call, and per-request
  * fallback across the rest of the eligible pool on a retryable error.
@@ -40,7 +40,7 @@ export interface GenerationLevers {
   maxTokens: number; // the chosen row's max_tokens
   promptVariant: string;
   form: string;
-  // Books experiment (docs/books.md): condensed committed neighbors, passed
+  // Books experiment (docs/reference/books.md): condensed committed neighbors, passed
   // through to the prompt. Not levers proper — continuity context — but they
   // travel with the levers so regeneration retries keep the same seams.
   prev?: string;

@@ -31,7 +31,7 @@ beforeEach(async () => {
   createMock.mockReset();
   await query("TRUNCATE model_registry");
   // A known 2-model chain, order 1 then order 2 — mirrors the seeded shape
-  // (docs/architecture.md §7) without depending on the real seed slugs.
+  // (docs/reference/architecture.md §7) without depending on the real seed slugs.
   await query(
     `INSERT INTO model_registry (slug, provider, task, enabled, "order", temperature, max_tokens)
      VALUES

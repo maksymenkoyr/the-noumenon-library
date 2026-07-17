@@ -7,7 +7,7 @@ import { config } from "./config";
  * fail-open like all alerting here: unset env (dev default) or a failed send
  * must never affect the stored report or the caller. The body carries only
  * the address and the reader's reason — nothing about the reporter
- * (docs/legal.md).
+ * (docs/reference/legal.md).
  */
 export async function sendReportEmail(report: {
   address: string;

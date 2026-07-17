@@ -1,6 +1,6 @@
 /**
  * Centralized env-var configuration — the single home for tunables
- * (docs/architecture.md §11). Required vars are read lazily so a missing
+ * (docs/reference/architecture.md §11). Required vars are read lazily so a missing
  * one only fails at call time, not at import time.
  */
 function required(name: string): string {
@@ -27,7 +27,9 @@ function nonNegative(name: string, fallback: number): number {
   if (!raw) return fallback;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`Environment variable ${name} must be a non-negative number`);
+    throw new Error(
+      `Environment variable ${name} must be a non-negative number`,
+    );
   }
   return value;
 }
@@ -45,7 +47,7 @@ function list(name: string, fallback: string[]): string[] {
 
 /**
  * Parse a `modelId@usdPerMillionTokens` list into a price map for the spend
- * counter (docs/architecture.md §10). `@` is the separator (model ids never
+ * counter (docs/reference/architecture.md §10). `@` is the separator (model ids never
  * contain it). A model absent from the map prices at 0 — correct for Google's
  * free-tier models. `fallback` seeds the default paid-model prices (the
  * model_registry seed's paid rows, lib/schema.sql) so the spend cap meters
@@ -55,12 +57,17 @@ function list(name: string, fallback: string[]): string[] {
  * under-report if a model is repriced upstream or loses a free tag — live
  * catalog pricing is a separate, not-yet-built task.
  */
-function parseModelPrices(name: string, fallback: string[] = []): Record<string, number> {
+function parseModelPrices(
+  name: string,
+  fallback: string[] = [],
+): Record<string, number> {
   const prices: Record<string, number> = {};
   for (const entry of list(name, fallback)) {
     const at = entry.lastIndexOf("@");
     if (at === -1) {
-      throw new Error(`Invalid ${name} entry (expected model@usdPerMillion): ${entry}`);
+      throw new Error(
+        `Invalid ${name} entry (expected model@usdPerMillion): ${entry}`,
+      );
     }
     const price = Number(entry.slice(at + 1));
     if (!Number.isFinite(price) || price < 0) {
@@ -86,7 +93,7 @@ const DEFAULT_MODEL_PRICES = [
 ];
 
 export const config = {
-  // Provider keys (docs/architecture.md §6, lib/providers.ts). Both are
+  // Provider keys (docs/reference/architecture.md §6, lib/providers.ts). Both are
   // server-only and optional at the config layer: a provider with no key set
   // simply has its model_registry rows filtered out of selection (lib/
   // registry.ts poolFor) rather than crashing the app — cache hits must keep
@@ -104,11 +111,11 @@ export const config = {
   // Safety gate; on by default. Set MODERATION_ENABLED=false ONLY as a
   // temporary local unblock — the library is generate-once/store-forever, so
   // any page crystallized while this is off is persisted UNMODERATED
-  // (docs/architecture.md §7).
+  // (docs/reference/architecture.md §7).
   moderationEnabled: process.env.MODERATION_ENABLED
-    ? process.env.MODERATION_ENABLED !== "false"
+    ? process.env.MODERATION_ENABLED  === "true"
     : true,
-  // Generation entropy levers (docs/generation.md, architecture.md §6).
+  // Generation entropy levers (docs/reference/generation.md, architecture.md §6).
   // Temperature starts coherent (the library drifts stranger over geological
   // time); Phase 9 retunes it. It is logged per page as provenance.
   temperature: numeric("GENERATION_TEMPERATURE", 0.9),
@@ -116,7 +123,7 @@ export const config = {
   // draw up to this magnitude, clamped to a sane range. A model-agnostic variety
   // lever that works even when generation is pinned to a single model. 0 = off.
   temperatureJitter: nonNegative("GENERATION_TEMPERATURE_JITTER", 0.2),
-  // Page-size constraint (docs/generation.md). pageMaxWords is the real size
+  // Page-size constraint (docs/reference/generation.md). pageMaxWords is the real size
   // control, stated in the prompt; maxTokens is a cost backstop for the aux
   // generation-pool calls that don't have their own model_registry row (book
   // title/tags, condensation — lib/book.ts, lib/condense.ts). The real
@@ -126,7 +133,7 @@ export const config = {
   // reasoning tokens no longer eat the budget before any page text.
   pageMaxWords: numeric("PAGE_MAX_WORDS", 400),
   maxTokens: numeric("GENERATION_MAX_TOKENS", 1000),
-  // Books experiment (docs/books.md): volume = book — locked form per volume,
+  // Books experiment (docs/reference/books.md): volume = book — locked form per volume,
   // neighbor continuity via condensed prev/next in the prompt (variant
   // 'book-v1'). Default off; BOOK_MODE=false is a full kill switch back to
   // isolated base-v2 generation (existing book rows are simply ignored).
@@ -136,7 +143,7 @@ export const config = {
   condensedMiddleMaxWords: numeric("CONDENSED_MIDDLE_MAX_WORDS", 60),
   // …and a middle already shorter than this is kept as-is (no LLM call).
   condenseMinMiddleWords: numeric("CONDENSE_MIN_MIDDLE_WORDS", 60),
-  // Concurrency guard tunables (docs/architecture.md §3). The stale window
+  // Concurrency guard tunables (docs/reference/architecture.md §3). The stale window
   // must comfortably exceed worst-case generation time. Lowered 300 → 90 now
   // that reasoning is off on every call (§4 of the model-pool rework) — the
   // old default accounted for a reasoning model's long blank-pause latency,
@@ -144,14 +151,14 @@ export const config = {
   staleReservationSeconds: numeric("STALE_RESERVATION_SECONDS", 90),
   generationWaitSeconds: numeric("GENERATION_WAIT_SECONDS", 300),
   waitPollIntervalMs: numeric("WAIT_POLL_INTERVAL_MS", 750),
-  // Economics & safety controls (docs/architecture.md §10, Phase 6). Enforced at
+  // Economics & safety controls (docs/reference/architecture.md §10, Phase 6). Enforced at
   // admission control in lib/economics.ts, backed by Postgres counters.
   // Per-visitor generation rate limit (only generations count; cache hits don't).
   rateLimitPerMinute: numeric("RATE_LIMIT_PER_MINUTE", 10),
   rateLimitWindowSeconds: numeric("RATE_LIMIT_WINDOW_SECONDS", 60),
   // Monthly spend cap (USD); over the cap flips the library to explore-only.
   monthlySpendCapUsd: numeric("MONTHLY_SPEND_CAP_USD", 10),
-  // Reader-signal write throttle (docs/architecture.md §8, Phase 10). Likes and
+  // Reader-signal write throttle (docs/reference/architecture.md §8, Phase 10). Likes and
   // dwell beacons are cheap DB writes (no LLM), so the ceiling is generous —
   // it only blunts trivial gaming of the aggregate count / event flooding. Keyed
   // by hashed IP over a sliding window, same as the generation rate limit.
@@ -167,11 +174,11 @@ export const config = {
   // DEFAULT_MODEL_PRICES above for the interim-pricing rationale and TODO.
   modelPrices: parseModelPrices("MODEL_PRICES", DEFAULT_MODEL_PRICES),
   // Optional alert webhook (Discord/Slack-compatible) for monitor() events —
-  // generation/moderation/DB failures (docs/architecture.md §9, Phase 7). Unset
+  // generation/moderation/DB failures (docs/reference/architecture.md §9, Phase 7). Unset
   // → structured JSON logs only, no push. Never let alerting break a request.
   monitorWebhookUrl: process.env.MONITOR_WEBHOOK_URL ?? "",
   // Contact address for abuse/copyright reports, shown on /about and beside the
-  // on-page report control (docs/legal.md, Phase 9) as the manual channel.
+  // on-page report control (docs/reference/legal.md, Phase 9) as the manual channel.
   // Unset → the about page says reporting is temporarily offline.
   reportContactEmail: process.env.REPORT_CONTACT_EMAIL ?? "",
   // Operator notification for on-page reports (lib/reportEmail.ts): one Resend

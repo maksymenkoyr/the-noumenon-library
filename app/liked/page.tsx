@@ -3,7 +3,7 @@ import Link from "next/link";
 import { LikedList } from "./liked-list";
 
 // The reader's own pressed leaves. Per-reader state lives entirely in
-// localStorage (no accounts — docs/legal.md), so the listing is a client
+// localStorage (no accounts — docs/reference/legal.md), so the listing is a client
 // component and this shell prerenders. Like /about, this static route shadows
 // the `[[...address]]` catch-all (static routes take priority; addresses are
 // always five segments, so nothing is masked).

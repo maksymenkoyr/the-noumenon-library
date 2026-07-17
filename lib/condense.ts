@@ -7,7 +7,7 @@ import { buildCondenseMiddlePrompt } from "./prompts";
 import { chooseGenerationModel } from "./registry";
 
 /**
- * Reverse-bell-curve condensation (docs/books.md). A page's condensed form
+ * Reverse-bell-curve condensation (docs/reference/books.md). A page's condensed form
  * keeps its first and last sentences near-verbatim — the seams a neighboring
  * page must join onto — and aggressively summarizes only the middle. The
  * seams are extracted deterministically; the LLM is an enrichment for the

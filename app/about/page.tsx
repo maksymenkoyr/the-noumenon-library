@@ -4,7 +4,7 @@ import { config } from "@/lib/config";
 
 // Static launch-hardening page (Phase 9): the legal disclaimer, non-commercial
 // notice, license/source, privacy posture, and the abuse/copyright report path
-// (docs/legal.md). No data fetch — this route prerenders. It also shadows the
+// (docs/reference/legal.md). No data fetch — this route prerenders. It also shadows the
 // `[[...address]]` optional catch-all for `/about` (static routes take priority).
 
 export const metadata: Metadata = {
@@ -62,7 +62,7 @@ export default function AboutPage() {
             stored in the clear) and the hash is discarded shortly after — see
             the{" "}
             <a
-              href={`${SOURCE_URL}/blob/main/docs/legal.md`}
+              href={`${SOURCE_URL}/blob/main/docs/reference/legal.md`}
               className="underline underline-offset-2"
               target="_blank"
               rel="noreferrer"

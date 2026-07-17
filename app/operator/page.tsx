@@ -16,7 +16,7 @@ import { getOperatorMode } from "@/lib/operatorMode";
 import { listOpenReports, type PageReport } from "@/lib/reports";
 import { ResolveButton } from "./resolve-button";
 
-// The operator-gated review surface (docs/architecture.md §8, Phase 10):
+// The operator-gated review surface (docs/reference/architecture.md §8, Phase 10):
 // the open-report queue + the read-only insight rollups (lib/insights.ts,
 // SQL views as source of truth). Same chrome as /about and /liked. Gated by
 // the signed session cookie's operator claim (lib/operatorMode) — non-

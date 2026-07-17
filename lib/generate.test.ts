@@ -39,7 +39,7 @@ beforeEach(async () => {
   createMock.mockReset();
   await query("TRUNCATE model_registry, model_stats");
   // A small, known 2-model pool so fallback order is deterministic to assert
-  // on (docs/architecture.md §6, model-pool rework).
+  // on (docs/reference/architecture.md §6, model-pool rework).
   await query(
     `INSERT INTO model_registry (slug, provider, task, enabled, weight, temperature, max_tokens)
      VALUES

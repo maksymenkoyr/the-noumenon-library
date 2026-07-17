@@ -3,7 +3,7 @@
  *
  * `/{gallery}/{wall}/{shelf}/{volume}/{page}`, e.g. `/io-9/3/2/17/308`.
  * The four small dimensions come from Borges; the gallery token supplies
- * the vast-but-enumerable horizon (docs/architecture.md §5).
+ * the vast-but-enumerable horizon (docs/reference/architecture.md §5).
  *
  * normalizeAddress is EFFECTIVELY PERMANENT once pages are stored —
  * changing it orphans every page. It is locked by lib/address.test.ts.
@@ -133,7 +133,7 @@ export function nextAddress(addr: Address): Address {
 
 /**
  * The volume prefix "gallery/wall/shelf/volume" — the `books` table key
- * under the books experiment (docs/books.md), where volume = book.
+ * under the books experiment (docs/reference/books.md), where volume = book.
  */
 export function volumeKey(addr: Address): string {
   return `${addr.gallery}/${addr.wall}/${addr.shelf}/${addr.volume}`;

@@ -1,13 +1,13 @@
 import { query } from "./db";
 
 /**
- * Reader content reports — the operator's review queue (docs/architecture.md
+ * Reader content reports — the operator's review queue (docs/reference/architecture.md
  * §8). Distinct from the dislike taste signal: a report says "someone should
  * look at this", so it is an append-only row that stays open until the
  * operator resolves it (/operator). Resolving is only an acknowledgement —
  * removal stays with scripts/takedown.mjs.
  *
- * No user identifiers are stored (docs/legal.md); the write endpoint throttles
+ * No user identifiers are stored (docs/reference/legal.md); the write endpoint throttles
  * by hashed IP upstream and that table never joins to this one.
  */
 
