@@ -7,6 +7,7 @@
 //   npm run invite -- "alice"                  create a link (label optional)
 //   npm run invite -- --dev "alice"            create a dev-mode link (sees the overlay)
 //   npm run invite -- --operator "alice"       create an operator link (can reach /operator)
+//   npm run invite -- --url <base> "alice"     print the link against a specific host
 //   npm run invite -- --grant-dev <tok>        upgrade an existing link to dev mode
 //   npm run invite -- --grant-operator <tok>   upgrade an existing link to operator
 //   npm run invite -- --list                   list every issued link + its status
@@ -18,16 +19,39 @@
 // effect once it is re-clicked.
 //
 // The printed base URL defaults to the production domain; override with
-// PUBLIC_BASE_URL=https://… npm run invite -- "bob"
+// --url https://… (highest precedence) or PUBLIC_BASE_URL=https://…
+// npm run invite -- "bob"
+//
+// Preview deployments: the token is only redeemable against whatever
+// DATABASE_URL this script connects to, so a token minted against the
+// production DB (the default, via .env.local) will never redeem on a preview
+// deployment reading a different (e.g. Neon-branched) DB. To invite someone
+// to a preview:
+//   1. Pull the preview env once: npx vercel env pull .env.preview --environment=preview
+//   2. npm run invite:preview -- --url https://<preview-host>.vercel.app "alice"
+// This mints the token in the preview DB and prints a link pointing at the
+// preview host — both must match the preview deployment for redemption to
+// succeed.
 import { randomBytes } from "node:crypto";
 import pg from "pg";
 
-// Pull the --dev/--operator flags out first; the remaining args are the
-// command / label.
+// Pull the --dev/--operator/--url flags out first; the remaining args are
+// the command / label.
 const rawArgs = process.argv.slice(2);
 const dev = rawArgs.includes("--dev");
 const operator = rawArgs.includes("--operator");
-const args = rawArgs.filter((a) => a !== "--dev" && a !== "--operator");
+const urlFlagIndex = rawArgs.indexOf("--url");
+let urlFlag = null;
+if (urlFlagIndex !== -1) {
+  urlFlag = rawArgs[urlFlagIndex + 1];
+  if (!urlFlag || urlFlag.startsWith("--")) {
+    console.error("Usage: npm run invite -- --url <base> ...");
+    process.exit(1);
+  }
+}
+const args = rawArgs.filter(
+  (a, i) => a !== "--dev" && a !== "--operator" && a !== "--url" && (urlFlagIndex === -1 || i !== urlFlagIndex + 1),
+);
 const arg = args[0];
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -35,7 +59,7 @@ if (!databaseUrl) {
   process.exit(1);
 }
 const base = (
-  process.env.PUBLIC_BASE_URL ?? "https://the-noumenon-library.vercel.app"
+  urlFlag ?? process.env.PUBLIC_BASE_URL ?? "https://the-noumenon-library.vercel.app"
 ).replace(/\/$/, "");
 
 const client = new pg.Client({ connectionString: databaseUrl });

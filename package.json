@@ -11,6 +11,7 @@
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
     "takedown": "node --env-file=.env.local scripts/takedown.mjs",
     "invite": "node --env-file=.env.local scripts/invite.mjs",
+    "invite:preview": "node --env-file=.env.preview scripts/invite.mjs",
     "backup": "node --env-file-if-exists=.env.local scripts/backup.mjs",
     "restore:verify": "node --env-file-if-exists=.env.local scripts/restore-verify.mjs",
     "wander": "node scripts/wander-sample.mjs",
