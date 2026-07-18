@@ -52,6 +52,7 @@ const gen = (text: string) => ({
   model: "mock-model",
   provider: "openrouter" as const,
   usage: { tokens: 100, costUsd: 0 },
+  prompt: `prompt for: ${text}`,
 });
 
 /** A fake title/tags completion. */

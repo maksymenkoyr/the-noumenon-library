@@ -46,6 +46,7 @@ const gen = (text: string, model = "mock-model") => ({
   model,
   provider: "openrouter" as const,
   usage: { tokens: 100, costUsd: 0 },
+  prompt: `prompt for: ${text}`,
 });
 
 beforeAll(async () => {
@@ -94,6 +95,9 @@ describe("generatePipeline", () => {
     expect(result.provenance.prompt_variant).toBe("base-v2");
     // The form/register lever is logged (in the seed_word column).
     expect(result.provenance.seed_word).toBeTruthy();
+    // The exact prompt that produced the committed content (dev-overlay
+    // provenance, lib/resolvePage.ts / lib/devMode).
+    expect(result.prompt).toBe("prompt for: a unique page");
     expect(generateMock).toHaveBeenCalledTimes(1);
   });
 
@@ -111,6 +115,8 @@ describe("generatePipeline", () => {
     expect(generateMock).toHaveBeenCalledTimes(2);
     // Usage is summed across every generation call (both attempts here).
     expect(result.usage.tokens).toBe(200);
+    // The prompt tracks the committed (regenerated) attempt, not the rejected one.
+    expect(result.prompt).toBe("prompt for: clean content");
     // A single reject that recovers on regen is normal — no monitor event.
     expect(monitorMock).not.toHaveBeenCalled();
   });
@@ -138,6 +144,7 @@ describe("generatePipeline", () => {
     const result = await generatePipeline(ADDR);
 
     expect(result.content).toBe("a different page");
+    expect(result.prompt).toBe("prompt for: a different page");
     expect(generateMock).toHaveBeenCalledTimes(2);
   });
 
@@ -154,6 +161,8 @@ describe("generatePipeline", () => {
 
     // Falls back to the already-passed original (near-duplicates are allowed).
     expect(result.content).toBe("duplicated content");
+    // The prompt matches the kept original, not the discarded dedup regen.
+    expect(result.prompt).toBe("prompt for: duplicated content");
     expect(generateMock).toHaveBeenCalledTimes(2);
   });
 

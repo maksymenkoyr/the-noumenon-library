@@ -40,6 +40,15 @@ export interface ResolvedPage {
   // generation only, so revisits (never re-timed) leave it undefined.
   model?: string;
   durationMs?: number;
+  // The exact prompt sent for this generation, plus the levers that produced
+  // it — fresh-generation only. The prompt is never persisted, and for
+  // book-v1 it depends on the neighbors/seam-case at generation time, so a
+  // revisit has no way to reconstruct the original exactly; the overlay
+  // simply omits it rather than showing something approximate.
+  prompt?: string;
+  promptVariant?: string;
+  form?: string;
+  temperature?: number;
 }
 
 const TAKEN_DOWN_PLACEHOLDER =
@@ -122,7 +131,7 @@ async function generateAndCommit(
       const addr = normalizeAddress(address.split("/"));
       if (addr) bookCtx = await resolveBookContext(addr, auxUsage);
     }
-    const { content, provenance, usage } = await generatePipeline(address, bookCtx);
+    const { content, provenance, usage, prompt } = await generatePipeline(address, bookCtx);
     const durationMs = Date.now() - startedAt;
     await commitPage(address, content, provenance);
     if (bookCtx) {
@@ -147,7 +156,16 @@ async function generateAndCommit(
       tokens: usage.tokens + auxUsage.tokens,
       costUsd: usage.costUsd + auxUsage.costUsd,
     });
-    return { status: "ok", text: content, model: provenance.model, durationMs };
+    return {
+      status: "ok",
+      text: content,
+      model: provenance.model,
+      durationMs,
+      prompt,
+      promptVariant: provenance.prompt_variant,
+      form: provenance.seed_word,
+      temperature: provenance.temperature,
+    };
   } catch (error) {
     // Unwedge the address so the next visitor becomes the first visitor. Covers
     // provider errors, an undetermined moderation result (lib/moderate throws),

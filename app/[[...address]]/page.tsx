@@ -109,6 +109,10 @@ async function PageBody({
         devMode={devMode}
         model={resolved.model}
         durationMs={resolved.durationMs}
+        prompt={resolved.prompt}
+        promptVariant={resolved.promptVariant}
+        form={resolved.form}
+        temperature={resolved.temperature}
       />
     );
   }
@@ -130,18 +134,38 @@ async function CommittedLeaf({
   devMode,
   model,
   durationMs,
+  prompt,
+  promptVariant,
+  form,
+  temperature,
 }: {
   address: string;
   text: string;
   devMode: boolean;
   model?: string;
   durationMs?: number;
+  // Fresh-generation-only dev provenance (lib/resolvePage.ts ResolvedPage);
+  // undefined on the synchronous committed-revisit render path above, so
+  // that path's DevBadge stays model-only, matching today's behavior.
+  prompt?: string;
+  promptVariant?: string;
+  form?: string;
+  temperature?: number;
 }) {
   const likeCount = await getLikeCount(address);
   return (
     <>
       <Leaf>{text}</Leaf>
-      {devMode && <DevBadge model={model} durationMs={durationMs} />}
+      {devMode && (
+        <DevBadge
+          model={model}
+          durationMs={durationMs}
+          prompt={prompt}
+          promptVariant={promptVariant}
+          form={form}
+          temperature={temperature}
+        />
+      )}
       <Marks address={address} initialCount={likeCount} />
       <Report address={address} contactEmail={config.reportContactEmail} />
     </>

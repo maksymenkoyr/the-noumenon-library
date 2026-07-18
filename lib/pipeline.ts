@@ -29,6 +29,10 @@ export interface PipelineResult {
   // actually cost, including regeneration/dedup retries (§10). Moderation tokens
   // are not counted (free models; the dominant cost is generation).
   usage: GenerationUsage;
+  // The exact prompt that produced `content` — dev-overlay provenance
+  // (lib/devMode), not persisted. Tracks whichever attempt (initial /
+  // moderation regen / dedup regen) ended up committed, same as `levers`.
+  prompt: string;
 }
 
 function provenanceFrom(levers: GenerationLevers): PageProvenance {
@@ -62,24 +66,26 @@ export async function generatePipeline(
   // generatePage() may fall back to a different pool model on a retryable
   // error — updates `levers.model`/`levers.provider` in place so provenance
   // always names the model that actually produced the content, not just the
-  // one requested.
-  const run = async (l: GenerationLevers): Promise<string> => {
+  // one requested. Also returns the exact prompt sent, for the caller to
+  // track alongside content (dev-overlay provenance).
+  const run = async (l: GenerationLevers): Promise<{ text: string; prompt: string }> => {
     const result = await generatePage(l);
     usage.tokens += result.usage.tokens;
     usage.costUsd += result.usage.costUsd;
     l.model = result.model;
     l.provider = result.provider;
-    return result.text;
+    return { text: result.text, prompt: result.prompt };
   };
 
-  // Track levers alongside content so provenance always matches what we commit.
+  // Track levers and the prompt that produced them alongside content, so
+  // provenance always matches what we commit.
   let levers = await chooseLevers(overrides);
-  let content = await run(levers);
+  let { text: content, prompt } = await run(levers);
 
   if (!(await moderate(content)).ok) {
     // Moderation fail → regenerate once with fresh levers (architecture §7).
     levers = await chooseLevers(overrides);
-    content = await run(levers);
+    ({ text: content, prompt } = await run(levers));
     if (!(await moderate(content)).ok) {
       // Two rejects in a row. We never store failing content, but we no longer
       // permanently dark-shelf the address — flag it and bail so resolvePage
@@ -96,12 +102,13 @@ export async function generatePipeline(
   // duplicates are allowed by design — no dark-shelving for a mere collision).
   if (await contentExistsElsewhere(hashContent(content), address)) {
     const dedupLevers = await chooseLevers(overrides);
-    const dedupContent = await run(dedupLevers);
-    if ((await moderate(dedupContent)).ok) {
+    const dedupRun = await run(dedupLevers);
+    if ((await moderate(dedupRun.text)).ok) {
       levers = dedupLevers;
-      content = dedupContent;
+      content = dedupRun.text;
+      prompt = dedupRun.prompt;
     }
   }
 
-  return { content, provenance: provenanceFrom(levers), usage };
+  return { content, provenance: provenanceFrom(levers), usage, prompt };
 }
