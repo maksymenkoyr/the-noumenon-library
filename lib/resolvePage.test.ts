@@ -27,6 +27,8 @@ vi.mock("./pipeline", () => ({
       },
       usage: { tokens: 100, costUsd: 0 },
       prompt: `prompt for ${address}`,
+      generationMs: 500,
+      moderationMs: 50,
     };
   }),
 }));
@@ -61,7 +63,9 @@ describe("resolvePage lifecycle", () => {
     // Fresh generation carries dev-overlay provenance: the model, a live
     // duration measurement, and the exact prompt + levers (lib/devMode).
     expect(page.model).toBe("test-model");
-    expect(typeof page.durationMs).toBe("number");
+    // Generation and moderation time are reported separately, not as one total.
+    expect(page.generationMs).toBe(500);
+    expect(page.moderationMs).toBe(50);
     expect(page.prompt).toBe("prompt for a/1/1/1/1");
     expect(page.promptVariant).toBe("base-v1");
     expect(page.form).toBe("a field guide entry");
@@ -80,13 +84,14 @@ describe("resolvePage lifecycle", () => {
     const first = await resolvePage("b/1/1/1/1");
     const second = await resolvePage("b/1/1/1/1");
     // The stored page is identical (status/text/model); only the live-measured
-    // durationMs differs — present on the fresh generation, absent on revisit.
+    // generationMs/moderationMs differ — present on the fresh generation, absent on revisit.
     expect(second).toMatchObject({
       status: first.status,
       text: first.text,
       model: first.model,
     });
-    expect(second.durationMs).toBeUndefined();
+    expect(second.generationMs).toBeUndefined();
+    expect(second.moderationMs).toBeUndefined();
     // The prompt is never persisted, and for book-v1 it depends on neighbors
     // at generation time — a revisit has no way to reconstruct it exactly, so
     // the overlay omits it rather than showing something approximate.

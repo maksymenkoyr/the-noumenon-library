@@ -108,7 +108,8 @@ async function PageBody({
         text={resolved.text}
         devMode={devMode}
         model={resolved.model}
-        durationMs={resolved.durationMs}
+        generationMs={resolved.generationMs}
+        moderationMs={resolved.moderationMs}
         prompt={resolved.prompt}
         promptVariant={resolved.promptVariant}
         form={resolved.form}
@@ -133,7 +134,8 @@ async function CommittedLeaf({
   text,
   devMode,
   model,
-  durationMs,
+  generationMs,
+  moderationMs,
   prompt,
   promptVariant,
   form,
@@ -143,7 +145,8 @@ async function CommittedLeaf({
   text: string;
   devMode: boolean;
   model?: string;
-  durationMs?: number;
+  generationMs?: number;
+  moderationMs?: number;
   // Fresh-generation-only dev provenance (lib/resolvePage.ts ResolvedPage);
   // undefined on the synchronous committed-revisit render path above, so
   // that path's DevBadge stays model-only, matching today's behavior.
@@ -159,7 +162,8 @@ async function CommittedLeaf({
       {devMode && (
         <DevBadge
           model={model}
-          durationMs={durationMs}
+          generationMs={generationMs}
+          moderationMs={moderationMs}
           prompt={prompt}
           promptVariant={promptVariant}
           form={form}

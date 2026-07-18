@@ -129,6 +129,10 @@ export interface GenerationResult {
   // persisted. Identical across every fallback attempt in one call (only the
   // model/provider vary), so it's safe to surface once per result.
   prompt: string;
+  // Wall time of the one attempt that actually answered — excludes any
+  // earlier failed fallback attempts, so this is generation time proper, not
+  // padded by retries against dead models.
+  durationMs: number;
 }
 
 /** Whether a failed call is worth retrying on a different pool model. */
@@ -227,12 +231,15 @@ export async function generatePage(
         messages: [{ role: "user", content: prompt }],
         ...reasoningParams(attempt.provider),
       });
-      void recordModelCall(attempt.slug, { ms: Date.now() - startedAt, ok: true });
+      const durationMs = Date.now() - startedAt;
+      void recordModelCall(attempt.slug, { ms: durationMs, ok: true });
       void markHealthy(attempt.slug, "generation");
 
       const tokens = response.usage?.total_tokens ?? 0;
       const pricePerMillion = config.modelPrices[attempt.slug] ?? 0;
       const costUsd = (tokens / 1_000_000) * pricePerMillion;
+
+      devLog(`generate ${attempt.slug} → ${tokens} tokens in ${durationMs}ms`);
 
       return {
         text: response.choices[0].message.content ?? "",
@@ -240,6 +247,7 @@ export async function generatePage(
         provider: attempt.provider,
         usage: { tokens, costUsd },
         prompt,
+        durationMs,
       };
     } catch (err) {
       void recordModelCall(attempt.slug, { ms: Date.now() - startedAt, ok: false });

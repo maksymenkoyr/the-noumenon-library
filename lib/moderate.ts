@@ -23,6 +23,10 @@ import { markCooling, markHealthy, markUnavailable, moderationChain, type Regist
 
 export interface ModerationResult {
   ok: boolean;
+  // Wall time spent in this moderate() call — every chain link tried,
+  // including abstains — so callers can report generation and moderation
+  // time separately instead of folding them into one combined total.
+  ms: number;
 }
 
 // One loud warning per process when the safety gate is switched off, so a
@@ -100,6 +104,7 @@ function markFailure(row: RegistryRow, err: unknown): void {
 }
 
 export async function moderate(text: string): Promise<ModerationResult> {
+  const startedAt = Date.now();
   if (!config.moderationEnabled) {
     // Fail-closed in production: never store unmoderated content (architecture
     // §7 invariant, docs/reference/legal.md). Throwing makes resolvePage release the
@@ -116,7 +121,7 @@ export async function moderate(text: string): Promise<ModerationResult> {
     // gate. warnModerationDisabled() leaves a loud, once-per-process warning +
     // audit event so a knowingly-unmoderated deploy is never silent in the logs.
     warnModerationDisabled();
-    return { ok: true };
+    return { ok: true, ms: Date.now() - startedAt };
   }
 
   const chain = await moderationChain();
@@ -125,6 +130,7 @@ export async function moderate(text: string): Promise<ModerationResult> {
   // and hits the same "undetermined" throw as every model abstaining.
   for (const row of chain) {
     let verdict: Verdict;
+    const linkStartedAt = Date.now();
     try {
       verdict = await classify(row, text);
       void markHealthy(row.slug, "moderation");
@@ -137,11 +143,12 @@ export async function moderate(text: string): Promise<ModerationResult> {
       continue; // error → next link in the chain
     }
 
-    devLog(`moderate ${row.slug} temp=${row.temperature} → ${verdict}`);
+    const linkMs = Date.now() - linkStartedAt;
+    devLog(`moderate ${row.slug} temp=${row.temperature} → ${verdict} (${linkMs}ms)`);
     if (verdict === "abstain") continue; // unclear reply → next link
 
     devLog(`moderate decision=${verdict === "pass" ? "PASS" : "FAIL"} (model=${row.slug})`);
-    return { ok: verdict === "pass" };
+    return { ok: verdict === "pass", ms: Date.now() - startedAt };
   }
 
   // Every link in the chain abstained, errored, or the chain was empty —
