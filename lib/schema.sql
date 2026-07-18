@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   label       TEXT,                    -- who it was issued to (operator note)
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   redeemed_at TIMESTAMPTZ,             -- most recent successful redemption
-  redeemed_ip TEXT                     -- best-effort, for the operator's record
+  redeemed_ip TEXT                     -- salted hash (lib/ipHash), never the raw IP; best-effort, for the operator's record
 );
 
 -- Dev-mode grant: an invite flagged here redeems into a session that sees the
@@ -89,6 +89,13 @@ CREATE TABLE IF NOT EXISTS access_tokens (
 -- claim is baked into the signed cookie at redemption, so upgrading an already-
 -- redeemed link takes effect only after it is re-clicked. Additive/idempotent.
 ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS dev_mode BOOLEAN NOT NULL DEFAULT false;
+
+-- One-time privacy cleanup: redeemed_ip used to store the raw address; it is
+-- now written as a salted sha256 hex digest (lib/ipHash, app/api/access).
+-- Clear any legacy value that isn't a 64-char hex hash. Idempotent: hashed
+-- values never match the filter.
+UPDATE access_tokens SET redeemed_ip = NULL
+ WHERE redeemed_ip IS NOT NULL AND redeemed_ip !~ '^[0-9a-f]{64}$';
 
 -- Reader signals (docs/architecture.md §8 "engagement", Phase 10). Two idioms,
 -- both mirroring existing counter tables above:

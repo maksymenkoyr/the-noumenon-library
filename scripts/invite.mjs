@@ -74,8 +74,10 @@ try {
       console.log("No invites issued yet.");
     }
     for (const r of rows) {
+      // redeemed_ip is a salted hash (lib/ipHash), never the raw address —
+      // the truncated prefix is just enough to tell redemptions apart.
       const status = r.redeemed_at
-        ? `last used ${new Date(r.redeemed_at).toISOString()}${r.redeemed_ip ? ` from ${r.redeemed_ip}` : ""}`
+        ? `last used ${new Date(r.redeemed_at).toISOString()}${r.redeemed_ip ? ` from ip#${r.redeemed_ip.slice(0, 8)}` : ""}`
         : "unused";
       const tag = `${r.dev_mode ? " [dev]" : ""}${r.operator ? " [op]" : ""}`;
       console.log(

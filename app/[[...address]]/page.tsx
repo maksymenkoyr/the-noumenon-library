@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
+import { connection } from "next/server";
 import {
   addressPath,
   formatAddress,
@@ -27,6 +28,15 @@ export default async function Page({
 }: {
   params: Promise<{ address?: string[] }>;
 }) {
+  // Force request-time rendering (same guard as app/operator/page.tsx),
+  // before anything whose result must differ per request: the bare-root
+  // redirect below would otherwise prerender with one frozen "random"
+  // address, and the committed-leaf branch touches no dynamic API when the
+  // access gate is inert in production — raw pg queries are not a dynamic
+  // signal — so Next could serve it from the full route cache, i.e. stale
+  // leaves and like counts.
+  await connection();
+
   const { address: segments } = await params;
   // The bare root is the random entry into the library.
   if (!segments) redirect(addressPath(randomAddress()));

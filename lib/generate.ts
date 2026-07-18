@@ -139,10 +139,13 @@ function shouldFallback(err: unknown): boolean {
  * 429 — cycling the rest of the free pool doesn't help. Detected primarily by
  * message text; the `x-ratelimit-remaining: 0` header is a fallback for cases
  * where the message wording drifts. Only ever relevant to `:free`-suffixed
- * OpenRouter slugs — the seeded pool is all-paid, so this is dormant unless a
- * `:free` model is added to model_registry later.
+ * OpenRouter slugs, so the attempt is checked first — an ordinary paid-model
+ * 429 also commonly carries `x-ratelimit-remaining: 0`, and must not park
+ * the whole free tier. The seeded pool is all-paid, so this is dormant
+ * unless a `:free` model is added to model_registry later.
  */
-function isAccountFreeCap(err: unknown): boolean {
+function isAccountFreeCap(err: unknown, attempt: Attempt): boolean {
+  if (attempt.provider !== "openrouter" || !isFreeSlug(attempt.slug)) return false;
   if (!(err instanceof OpenAI.APIError) || err.status !== 429) return false;
   if (err.message?.toLowerCase().includes("free-models-per-day")) return true;
   return err.headers?.get?.("x-ratelimit-remaining") === "0";
@@ -218,6 +221,18 @@ export async function generatePage(
         messages: [{ role: "user", content: prompt }],
         ...reasoningParams(attempt.provider),
       });
+      const text = response.choices[0]?.message.content ?? "";
+      if (!text.trim()) {
+        // An empty completion (truncation, upstream filtering, a glitching
+        // model) must never crystallize: generate-once/store-forever would
+        // make the blank leaf permanent. Treat it like any other retryable
+        // model failure and fall through the rest of the pool.
+        void recordModelCall(attempt.slug, { ms: Date.now() - startedAt, ok: false });
+        lastErr = new Error(`Empty completion from ${attempt.slug}`);
+        if (i === attempts.length - 1) throw lastErr;
+        devLog(`generate model=${attempt.slug} returned an empty completion → falling back`);
+        continue;
+      }
       void recordModelCall(attempt.slug, { ms: Date.now() - startedAt, ok: true });
       void markHealthy(attempt.slug, "generation");
 
@@ -226,7 +241,7 @@ export async function generatePage(
       const costUsd = (tokens / 1_000_000) * pricePerMillion;
 
       return {
-        text: response.choices[0].message.content ?? "",
+        text,
         model: attempt.slug,
         provider: attempt.provider,
         usage: { tokens, costUsd },
@@ -238,7 +253,7 @@ export async function generatePage(
       const status = errorStatus(err);
       if (status === 404) {
         void markUnavailable(attempt.slug, "generation");
-      } else if (isAccountFreeCap(err)) {
+      } else if (isAccountFreeCap(err, attempt)) {
         void markRateLimited(FREE_TIER_KEY, ACCOUNT_FREE_CAP_COOLDOWN_SECONDS);
         // The whole free tier is capped for the day — drop any remaining
         // free attempts so the loop jumps straight to the paid tail instead

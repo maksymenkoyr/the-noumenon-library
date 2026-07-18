@@ -16,6 +16,7 @@ vi.mock("./providers", async () => {
 
 import { closePool, query } from "./db";
 import { chooseLevers, generatePage, type GenerationLevers } from "./generate";
+import { FREE_TIER_KEY } from "./modelStats";
 
 /** A minimal fake OpenAI chat completion. */
 function completion(content: string, totalTokens = 0) {
@@ -115,6 +116,27 @@ describe("generatePage fallback", () => {
     expect(createMock).toHaveBeenCalledTimes(2); // model-a, then model-b
   });
 
+  it("treats an empty completion as retryable and falls back", async () => {
+    // Generate-once/store-forever: a blank completion must never be returned
+    // (it would crystallize as a permanently empty leaf).
+    createMock
+      .mockResolvedValueOnce(completion("   \n", 3))
+      .mockResolvedValueOnce(completion("real text", 5));
+
+    const result = await generatePage(levers);
+
+    expect(result.text).toBe("real text");
+    expect(result.model).toBe("model-b");
+    expect(createMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws rather than returning empty text when every model comes back blank", async () => {
+    createMock.mockResolvedValue(completion(""));
+
+    await expect(generatePage(levers)).rejects.toThrow(/empty completion/i);
+    expect(createMock).toHaveBeenCalledTimes(2); // model-a, then model-b
+  });
+
   it("reports the actually-answering model in the result, not just the requested one", async () => {
     createMock.mockResolvedValueOnce(completion("first try", 5));
     const result = await generatePage(levers);
@@ -135,6 +157,31 @@ describe("generatePage fallback", () => {
     // so there's nothing left to try and the original error rethrows.
     await expect(generatePage(levers)).rejects.toThrow(/rate limited/i);
     expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not park the free tier on a paid-model 429 carrying x-ratelimit-remaining: 0", async () => {
+    // Ordinary per-model 429s commonly carry that header; only a `:free`
+    // OpenRouter slug can mean the account-wide free-models-per-day cap.
+    createMock
+      .mockRejectedValueOnce(
+        new OpenAI.APIError(
+          429,
+          undefined,
+          "rate limited",
+          new Headers({ "x-ratelimit-remaining": "0" }),
+        ),
+      )
+      .mockResolvedValueOnce(completion("fallback", 5));
+
+    await generatePage(levers);
+
+    // Give the fire-and-forget markRateLimited (had it fired) time to land.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const rows = await query(
+      "SELECT 1 FROM model_stats WHERE model = $1 AND rate_limited_until IS NOT NULL",
+      [FREE_TIER_KEY],
+    );
+    expect(rows).toHaveLength(0);
   });
 
   it("marks a 429'd model cooling so a later selection skips it", async () => {
