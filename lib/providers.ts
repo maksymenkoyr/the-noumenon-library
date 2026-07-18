@@ -64,17 +64,22 @@ export function getClient(provider: Provider): OpenAI | undefined {
  * — reasoning tokens are pure cost and latency for a page of prose; they're
  * the whole reason GENERATION_MAX_TOKENS used to need to be 4000 and
  * STALE_RESERVATION_SECONDS 300. The two providers spell "off" differently:
- * OpenRouter has a unified `reasoning` request field; Google's OpenAI-compat
- * endpoint takes `reasoning_effort` (not part of the official OpenAI SDK
- * types, so it travels via `extra_body`, which OpenRouter also tolerates
- * being absent from). Spread the result into every chat.completions.create
- * call — unconditionally, not gated on the model_registry.reasoning_enabled
- * column (that column documents the setting on the row; enforcement is this
- * one code path, so it can never drift per-model).
+ * OpenRouter has a unified top-level `reasoning` request field; Google's
+ * OpenAI-compat endpoint takes a top-level `reasoning_effort`. Neither is part
+ * of the official OpenAI SDK types, but both travel fine as extra top-level
+ * keys spread into chat.completions.create — the SDK serializes unknown keys
+ * verbatim. Do NOT wrap either in `extra_body`: that's an OpenAI *Python* SDK
+ * convention (Python unpacks it into the request body); the TS SDK has no
+ * such feature, so `extra_body` would ship as a literal top-level field and
+ * Google's gateway rejects it with a bodyless 400. Spread the result into
+ * every chat.completions.create call — unconditionally, not gated on the
+ * model_registry.reasoning_enabled column (that column documents the setting
+ * on the row; enforcement is this one code path, so it can never drift
+ * per-model).
  */
 export function reasoningParams(provider: Provider): Record<string, unknown> {
   if (provider === "google") {
-    return { extra_body: { reasoning_effort: "none" } };
+    return { reasoning_effort: "none" };
   }
   return { reasoning: { enabled: false } };
 }
