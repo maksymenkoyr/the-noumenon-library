@@ -42,6 +42,9 @@ export interface ResolvedPage {
   model?: string;
   generationMs?: number;
   moderationMs?: number;
+  // The chain link that passed the committed content (lib/moderate.ts) — same
+  // fresh-generation-only, non-persisted rule as the timings above.
+  moderationModel?: string;
   // The exact prompt sent for this generation, plus the levers that produced
   // it — fresh-generation only. The prompt is never persisted, and for
   // book-v1 it depends on the neighbors/seam-case at generation time, so a
@@ -132,7 +135,7 @@ async function generateAndCommit(
       const addr = normalizeAddress(address.split("/"));
       if (addr) bookCtx = await resolveBookContext(addr, auxUsage);
     }
-    const { content, provenance, usage, prompt, generationMs, moderationMs } =
+    const { content, provenance, usage, prompt, generationMs, moderationMs, moderationModel } =
       await generatePipeline(address, bookCtx);
     await commitPage(address, content, provenance);
     if (bookCtx) {
@@ -163,6 +166,7 @@ async function generateAndCommit(
       model: provenance.model,
       generationMs,
       moderationMs,
+      moderationModel,
       prompt,
       promptVariant: provenance.prompt_variant,
       form: provenance.seed_word,

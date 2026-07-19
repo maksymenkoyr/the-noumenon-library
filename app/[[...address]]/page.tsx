@@ -109,6 +109,7 @@ async function PageBody({
         devMode={devMode}
         model={resolved.model}
         generationMs={resolved.generationMs}
+        moderationModel={resolved.moderationModel}
         moderationMs={resolved.moderationMs}
         prompt={resolved.prompt}
         promptVariant={resolved.promptVariant}
@@ -135,6 +136,7 @@ async function CommittedLeaf({
   devMode,
   model,
   generationMs,
+  moderationModel,
   moderationMs,
   prompt,
   promptVariant,
@@ -146,6 +148,7 @@ async function CommittedLeaf({
   devMode: boolean;
   model?: string;
   generationMs?: number;
+  moderationModel?: string;
   moderationMs?: number;
   // Fresh-generation-only dev provenance (lib/resolvePage.ts ResolvedPage);
   // undefined on the synchronous committed-revisit render path above, so
@@ -163,6 +166,7 @@ async function CommittedLeaf({
         <DevBadge
           model={model}
           generationMs={generationMs}
+          moderationModel={moderationModel}
           moderationMs={moderationMs}
           prompt={prompt}
           promptVariant={promptVariant}

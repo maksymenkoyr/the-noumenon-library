@@ -6,7 +6,7 @@ import {
   type GenerationLevers,
   type LeverOverrides,
 } from "./generate";
-import { moderate } from "./moderate";
+import { moderate, type ModerationResult } from "./moderate";
 import { monitor } from "./monitor";
 import { BOOK_PROMPT_VARIANT } from "./prompts";
 import { contentExistsElsewhere, hashContent, type PageProvenance } from "./store";
@@ -39,6 +39,10 @@ export interface PipelineResult {
   // spend that time.
   generationMs: number;
   moderationMs: number;
+  // The chain link that passed whichever attempt ended up committed — dev-
+  // overlay provenance, same tracking rule as `prompt`/`levers` above.
+  // Undefined only if moderation was disabled outright (lib/moderate.ts).
+  moderationModel?: string;
 }
 
 function provenanceFrom(levers: GenerationLevers): PageProvenance {
@@ -86,11 +90,13 @@ export async function generatePipeline(
     return { text: result.text, prompt: result.prompt };
   };
   // Runs moderation and folds in its wall time, kept separate from generation
-  // time above (dev-overlay provenance — see PipelineResult).
-  const check = async (text: string): Promise<boolean> => {
+  // time above (dev-overlay provenance — see PipelineResult). Returns the full
+  // result (not just ok) so callers can attribute `moderationModel` only to
+  // whichever attempt ends up committed, same rule as content/prompt/levers.
+  const check = async (text: string): Promise<ModerationResult> => {
     const result = await moderate(text);
     moderationMs += result.ms;
-    return result.ok;
+    return result;
   };
 
   // Track levers and the prompt that produced them alongside content, so
@@ -98,11 +104,13 @@ export async function generatePipeline(
   let levers = await chooseLevers(overrides);
   let { text: content, prompt } = await run(levers);
 
-  if (!(await check(content))) {
+  let modResult = await check(content);
+  if (!modResult.ok) {
     // Moderation fail → regenerate once with fresh levers (architecture §7).
     levers = await chooseLevers(overrides);
     ({ text: content, prompt } = await run(levers));
-    if (!(await check(content))) {
+    modResult = await check(content);
+    if (!modResult.ok) {
       // Two rejects in a row. We never store failing content, but we no longer
       // permanently dark-shelf the address — flag it and bail so resolvePage
       // releases the reservation and a later visit retries (§7). A recurring
@@ -111,6 +119,7 @@ export async function generatePipeline(
       throw new Error(`Moderation rejected ${address} twice`);
     }
   }
+  let moderationModel = modResult.model;
 
   // Dedup: on an exact-hash collision with another address, regenerate once
   // (a fresh sample) (§8). The regen must itself pass moderation before it can
@@ -119,10 +128,12 @@ export async function generatePipeline(
   if (await contentExistsElsewhere(hashContent(content), address)) {
     const dedupLevers = await chooseLevers(overrides);
     const dedupRun = await run(dedupLevers);
-    if (await check(dedupRun.text)) {
+    const dedupModResult = await check(dedupRun.text);
+    if (dedupModResult.ok) {
       levers = dedupLevers;
       content = dedupRun.text;
       prompt = dedupRun.prompt;
+      moderationModel = dedupModResult.model;
     }
   }
 
@@ -133,5 +144,6 @@ export async function generatePipeline(
     prompt,
     generationMs,
     moderationMs,
+    moderationModel,
   };
 }
