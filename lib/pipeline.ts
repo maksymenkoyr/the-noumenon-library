@@ -46,7 +46,6 @@ function provenanceFrom(levers: GenerationLevers): PageProvenance {
     model: levers.model,
     temperature: levers.temperature,
     prompt_variant: levers.promptVariant,
-    seed_word: levers.form,
   };
 }
 
@@ -54,12 +53,11 @@ export async function generatePipeline(
   address: string,
   bookCtx?: BookContext,
 ): Promise<PipelineResult> {
-  // Book mode (docs/reference/books.md) pins the book's locked form, the book variant,
-  // and the neighbor seams on EVERY attempt — including the moderation and
-  // dedup regenerations below — so a retry can't fall out of the book's voice.
+  // Book mode (docs/reference/books.md) pins the book variant and the
+  // neighbor seams on EVERY attempt — including the moderation and dedup
+  // regenerations below — so a retry can't fall out of the book's continuity.
   const overrides: LeverOverrides = bookCtx
     ? {
-        form: bookCtx.book.form,
         promptVariant: BOOK_PROMPT_VARIANT,
         prev: bookCtx.prev,
         next: bookCtx.next,

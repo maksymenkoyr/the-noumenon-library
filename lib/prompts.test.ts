@@ -7,13 +7,12 @@ import {
   parseBookMetadata,
 } from "./prompts";
 
-const ctx = { maxWords: 400, form: "a ship's log" };
+const ctx = { maxWords: 400 };
 
 describe("buildPrompt", () => {
-  it("states the size constraint and injects the chosen form", () => {
+  it("states the size constraint", () => {
     const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
     expect(prompt).toContain("400");
-    expect(prompt).toContain("a ship's log");
     // The not-knowing is re-aimed at the page, not the model.
     expect(prompt).toContain("You do not know what it is");
   });
@@ -51,9 +50,8 @@ describe("book-v1 (books experiment)", () => {
     expect(PROMPT_VARIANT_IDS).toContain(BOOK_PROMPT_VARIANT);
   });
 
-  it.each(cases)("$name: injects the form, never an address or page-self framing", ({ ctx: c }) => {
+  it.each(cases)("$name: never an address or page-self framing", ({ ctx: c }) => {
     const prompt = buildPrompt(BOOK_PROMPT_VARIANT, c);
-    expect(prompt).toContain("a ship's log");
     expect(prompt).toContain("400");
     // The locality lessons: no coordinates, model reads rather than *is* a page.
     expect(prompt).not.toMatch(/\b[a-z0-9-]+\/\d+\/\d+\/\d+\/\d+\b/);

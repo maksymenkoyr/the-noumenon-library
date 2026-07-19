@@ -30,7 +30,6 @@ const levers: GenerationLevers = {
   temperature: 0.9,
   maxTokens: 1000,
   promptVariant: "base-v2",
-  form: "a field guide entry",
 };
 
 beforeAll(async () => {
@@ -130,7 +129,6 @@ describe("generatePage fallback", () => {
 
     const expectedPrompt = buildPrompt(levers.promptVariant, {
       maxWords: config.pageMaxWords,
-      form: levers.form,
       prev: levers.prev,
       next: levers.next,
     });
@@ -181,23 +179,20 @@ describe("chooseLevers", () => {
     }
   });
 
-  it("applies book-mode overrides (locked form/variant/neighbors)", async () => {
+  it("applies book-mode overrides (locked variant/neighbors)", async () => {
     const result = await chooseLevers({
-      form: "a prayer",
       promptVariant: "book-v1",
       prev: "prev text",
       next: "next text",
     });
-    expect(result.form).toBe("a prayer");
     expect(result.promptVariant).toBe("book-v1");
     expect(result.prev).toBe("prev text");
     expect(result.next).toBe("next text");
   });
 
-  it("defaults to a random form and the base-v2 variant with no overrides", async () => {
+  it("defaults to the base-v2 variant with no overrides", async () => {
     const result = await chooseLevers();
     expect(result.promptVariant).toBe("base-v2");
-    expect(result.form).toBeTruthy();
     expect(result.prev).toBeUndefined();
     expect(result.next).toBeUndefined();
   });

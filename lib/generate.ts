@@ -16,11 +16,7 @@ import {
   reasoningParams,
   type Provider,
 } from "./providers";
-import {
-  buildPrompt,
-  DEFAULT_PROMPT_VARIANT,
-  GENERATION_FORMS,
-} from "./prompts";
+import { buildPrompt, DEFAULT_PROMPT_VARIANT } from "./prompts";
 import { chooseGenerationModel, markCooling, markHealthy, markUnavailable, poolFor } from "./registry";
 
 /**
@@ -39,7 +35,6 @@ export interface GenerationLevers {
   temperature: number; // jittered around the chosen row's base temperature
   maxTokens: number; // the chosen row's max_tokens
   promptVariant: string;
-  form: string;
   // Books experiment (docs/reference/books.md): condensed committed neighbors, passed
   // through to the prompt. Not levers proper — continuity context — but they
   // travel with the levers so regeneration retries keep the same seams.
@@ -48,18 +43,13 @@ export interface GenerationLevers {
 }
 
 /**
- * Book-mode pins the form (the book's locked register) and the prompt
- * variant; model and temperature jitter stay random per attempt.
+ * Book-mode pins the prompt variant; model and temperature jitter stay
+ * random per attempt.
  */
 export interface LeverOverrides {
-  form?: string;
   promptVariant?: string;
   prev?: string;
   next?: string;
-}
-
-function pick<T>(pool: readonly T[]): T {
-  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 /** Fisher-Yates shuffle; does not mutate the input. */
@@ -84,21 +74,20 @@ function jitteredTemperature(base: number): number {
 
 /**
  * Pick the entropy levers for one generation: a weighted-lottery model pick
- * (lib/registry.ts chooseGenerationModel), a random form/register for the
- * page, and a per-page jittered temperature — all logged as provenance so the
- * library's own evolution stays mappable.
+ * (lib/registry.ts chooseGenerationModel) and a per-page jittered
+ * temperature — all logged as provenance so the library's own evolution
+ * stays mappable.
  */
 export async function chooseLevers(
   overrides: LeverOverrides = {},
 ): Promise<GenerationLevers> {
   const stats = await getModelStats();
   const chosen = await chooseGenerationModel(stats);
-  const form = overrides.form ?? pick(GENERATION_FORMS);
   const promptVariant = overrides.promptVariant ?? DEFAULT_PROMPT_VARIANT;
   const temperature = jitteredTemperature(chosen.temperature);
   devLog(
     `generate model=${chosen.slug} provider=${chosen.provider} ` +
-      `temp=${temperature.toFixed(2)} form="${form}" variant=${promptVariant}`,
+      `temp=${temperature.toFixed(2)} variant=${promptVariant}`,
   );
   return {
     model: chosen.slug,
@@ -106,7 +95,6 @@ export async function chooseLevers(
     temperature,
     maxTokens: chosen.maxTokens,
     promptVariant,
-    form,
     prev: overrides.prev,
     next: overrides.next,
   };
@@ -187,7 +175,6 @@ export async function generatePage(
 ): Promise<GenerationResult> {
   const prompt = buildPrompt(levers.promptVariant, {
     maxWords: config.pageMaxWords,
-    form: levers.form,
     prev: levers.prev,
     next: levers.next,
   });

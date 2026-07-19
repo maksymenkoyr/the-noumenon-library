@@ -17,7 +17,6 @@ export interface PageRow {
   model: string | null;
   prompt_variant: string | null;
   temperature: number | null;
-  seed_word: string | null;
   created_at: Date;
   committed_at: Date | null;
   // Reverse-bell-curve digest for neighbor context (docs/reference/books.md); NULL for
@@ -29,9 +28,6 @@ export interface PageProvenance {
   model: string;
   prompt_variant?: string;
   temperature?: number;
-  // The chosen form/register lever, stored in the reserved seed_word column
-  // (docs/reference/generation.md, architecture §8) — a seed-like input, revived.
-  seed_word?: string;
 }
 
 /** SHA-256 of page content — the dedup key (docs/reference/architecture.md §8). */
@@ -104,8 +100,6 @@ export async function commitPage(
   provenance: PageProvenance,
 ): Promise<void> {
   const contentHash = hashContent(content);
-  // seed_word now carries the form/register lever (docs/reference/generation.md); it stays
-  // nullable, so callers that don't set it (e.g. tests) simply leave it null.
   await query(
     `UPDATE pages SET
        status = 'ok',
@@ -114,7 +108,6 @@ export async function commitPage(
        model = $4,
        prompt_variant = $5,
        temperature = $6,
-       seed_word = $7,
        committed_at = now()
      WHERE address = $1`,
     [
@@ -124,7 +117,6 @@ export async function commitPage(
       provenance.model,
       provenance.prompt_variant ?? null,
       provenance.temperature ?? null,
-      provenance.seed_word ?? null,
     ],
   );
 }
@@ -163,7 +155,6 @@ export async function releaseReservation(address: string): Promise<void> {
 
 export interface BookRow {
   volume_key: string;
-  form: string;
   title: string | null;
   tags: string[] | null;
   model: string | null;
@@ -181,20 +172,17 @@ export async function getBook(volumeKey: string): Promise<BookRow | null> {
 }
 
 /**
- * Create-or-get a book row, locking its form at creation. Race-safe the same
- * way reservePage is: of N concurrent first-pages in a volume, exactly one
- * INSERT wins and everyone re-reads the winner's form.
+ * Create-or-get a book row. Race-safe the same way reservePage is: of N
+ * concurrent first-pages in a volume, exactly one INSERT wins and everyone
+ * re-reads the winner's row.
  */
-export async function ensureBook(
-  volumeKey: string,
-  form: string,
-): Promise<BookRow> {
+export async function ensureBook(volumeKey: string): Promise<BookRow> {
   const rows = await query<BookRow>(
-    `INSERT INTO books (volume_key, form)
-     VALUES ($1, $2)
+    `INSERT INTO books (volume_key)
+     VALUES ($1)
      ON CONFLICT (volume_key) DO NOTHING
      RETURNING *`,
-    [volumeKey, form],
+    [volumeKey],
   );
   if (rows[0]) return rows[0];
   const existing = await getBook(volumeKey);
