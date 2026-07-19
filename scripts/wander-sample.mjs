@@ -23,7 +23,7 @@ async function walk() {
     headers: { accept: "application/json" },
   });
   if (!res.ok) throw new Error(`${base}/api/generate → ${res.status}`);
-  return res.json(); // { address, status, text, model, generationMs, moderationMs, moderationModel }
+  return res.json(); // { address, status, text, model, generationMs, moderationMs, moderationModel, prompt }
 }
 
 /** Render the provenance line for one page — degrades gracefully for a
@@ -64,7 +64,7 @@ for (let i = 1; i <= count; i++) {
   process.stdout.write(`\rwalking ${i}/${count}…`);
   try {
     const result = await walk();
-    const { address, status, text } = result;
+    const { address, status, text, prompt } = result;
     const provenance = provenanceLine(result);
     lines.push(
       `### ${i}. \`${address}\`  — status: ${status}`,
@@ -74,6 +74,9 @@ for (let i = 1; i <= count; i++) {
       "",
       status === "ok" ? text : `_(${status} — no page)_`,
       "",
+      ...(prompt
+        ? ["<details>", "<summary>prompt</summary>", "", "```", prompt, "```", "", "</details>", ""]
+        : []),
       "---",
       "",
     );
