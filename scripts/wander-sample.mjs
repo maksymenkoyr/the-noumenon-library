@@ -66,22 +66,24 @@ for (let i = 1; i <= count; i++) {
     const result = await walk();
     const { address, status, text, prompt } = result;
     const provenance = provenanceLine(result);
-    lines.push(
-      `### ${i}. \`${address}\`  — status: ${status}`,
+    const block = [
+      `# \`${address}\`  — status: ${status}`,
       "",
       ...(provenance ? [provenance, ""] : []),
       "score: `[ ]`  (pause / hollow / blank)",
       "",
-      status === "ok" ? text : `_(${status} — no page)_`,
+      ...(status === "ok" ? text.split("\n") : [`_(${status} — no page)_`]),
       "",
       ...(prompt
-        ? ["<details>", "<summary>prompt</summary>", "", "```", prompt, "```", "", "</details>", ""]
+        ? ["<details>", "<summary>prompt</summary>", "", "```", ...prompt.split("\n"), "```", "", "</details>", ""]
         : []),
-      "---",
+    ];
+    lines.push(
+      ...block.map((line, idx) => (idx === 0 ? `${i}. ${line}` : line === "" ? "" : `   ${line}`)),
       "",
     );
   } catch (error) {
-    lines.push(`### ${i}. — error`, "", `\`${String(error)}\``, "", "---", "");
+    lines.push(`${i}. # — error`, "", `   \`${String(error)}\``, "", "");
   }
 }
 process.stdout.write("\n");
