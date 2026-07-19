@@ -16,7 +16,7 @@ vi.mock("./generate", async () => {
 });
 // Mock moderation so the pipeline never hits the network; default = pass.
 vi.mock("./moderate", () => ({
-  moderate: vi.fn(async () => ({ ok: true })),
+  moderate: vi.fn(async () => ({ ok: true, ms: 50 })),
 }));
 // Mock monitoring so we can assert which structured events the pipeline emits
 // without writing JSON to the test output.
@@ -46,6 +46,8 @@ const gen = (text: string, model = "mock-model") => ({
   model,
   provider: "openrouter" as const,
   usage: { tokens: 100, costUsd: 0 },
+  prompt: `prompt for: ${text}`,
+  durationMs: 500,
 });
 
 beforeAll(async () => {
@@ -68,7 +70,7 @@ beforeEach(async () => {
   generateMock.mockReset();
   moderateMock.mockReset();
   monitorMock.mockReset();
-  moderateMock.mockResolvedValue({ ok: true });
+  moderateMock.mockResolvedValue({ ok: true, ms: 50 });
 });
 
 afterAll(async () => {
@@ -94,6 +96,12 @@ describe("generatePipeline", () => {
     expect(result.provenance.prompt_variant).toBe("base-v2");
     // The form/register lever is logged (in the seed_word column).
     expect(result.provenance.seed_word).toBeTruthy();
+    // The exact prompt that produced the committed content (dev-overlay
+    // provenance, lib/resolvePage.ts / lib/devMode).
+    expect(result.prompt).toBe("prompt for: a unique page");
+    // Generation and moderation time are reported separately, not as one total.
+    expect(result.generationMs).toBe(500);
+    expect(result.moderationMs).toBe(50);
     expect(generateMock).toHaveBeenCalledTimes(1);
   });
 
@@ -102,8 +110,8 @@ describe("generatePipeline", () => {
       .mockResolvedValueOnce(gen("flagged content"))
       .mockResolvedValueOnce(gen("clean content"));
     moderateMock
-      .mockResolvedValueOnce({ ok: false }) // first attempt fails
-      .mockResolvedValueOnce({ ok: true }); // regenerated attempt passes
+      .mockResolvedValueOnce({ ok: false, ms: 40 }) // first attempt fails
+      .mockResolvedValueOnce({ ok: true, ms: 60 }); // regenerated attempt passes
 
     const result = await generatePipeline(ADDR);
 
@@ -111,13 +119,18 @@ describe("generatePipeline", () => {
     expect(generateMock).toHaveBeenCalledTimes(2);
     // Usage is summed across every generation call (both attempts here).
     expect(result.usage.tokens).toBe(200);
+    // The prompt tracks the committed (regenerated) attempt, not the rejected one.
+    expect(result.prompt).toBe("prompt for: clean content");
+    // Both timings sum across every attempt, including the moderation reject.
+    expect(result.generationMs).toBe(1000);
+    expect(result.moderationMs).toBe(100);
     // A single reject that recovers on regen is normal — no monitor event.
     expect(monitorMock).not.toHaveBeenCalled();
   });
 
   it("throws and flags a persistent reject (no dark-shelf) when moderation fails twice", async () => {
     generateMock.mockResolvedValue(gen("flagged content"));
-    moderateMock.mockResolvedValue({ ok: false });
+    moderateMock.mockResolvedValue({ ok: false, ms: 40 });
 
     await expect(generatePipeline(ADDR)).rejects.toThrow(/moderation rejected/i);
     expect(generateMock).toHaveBeenCalledTimes(2);
@@ -138,6 +151,7 @@ describe("generatePipeline", () => {
     const result = await generatePipeline(ADDR);
 
     expect(result.content).toBe("a different page");
+    expect(result.prompt).toBe("prompt for: a different page");
     expect(generateMock).toHaveBeenCalledTimes(2);
   });
 
@@ -147,13 +161,15 @@ describe("generatePipeline", () => {
       .mockResolvedValueOnce(gen("duplicated content")) // passes moderation, collides
       .mockResolvedValueOnce(gen("a different page")); // dedup regen, fails moderation
     moderateMock
-      .mockResolvedValueOnce({ ok: true }) // original passes
-      .mockResolvedValueOnce({ ok: false }); // dedup regen fails
+      .mockResolvedValueOnce({ ok: true, ms: 50 }) // original passes
+      .mockResolvedValueOnce({ ok: false, ms: 45 }); // dedup regen fails
 
     const result = await generatePipeline(ADDR);
 
     // Falls back to the already-passed original (near-duplicates are allowed).
     expect(result.content).toBe("duplicated content");
+    // The prompt matches the kept original, not the discarded dedup regen.
+    expect(result.prompt).toBe("prompt for: duplicated content");
     expect(generateMock).toHaveBeenCalledTimes(2);
   });
 
@@ -213,8 +229,8 @@ describe("generatePipeline with a book context (books experiment)", () => {
       .mockResolvedValueOnce(gen("colliding content")) // passes, then collides
       .mockResolvedValueOnce(gen("a fresh book page")); // dedup regen
     moderateMock
-      .mockResolvedValueOnce({ ok: false })
-      .mockResolvedValue({ ok: true });
+      .mockResolvedValueOnce({ ok: false, ms: 40 })
+      .mockResolvedValue({ ok: true, ms: 50 });
 
     const result = await generatePipeline(ADDR, bookCtx);
 

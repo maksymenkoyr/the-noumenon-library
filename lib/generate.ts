@@ -124,6 +124,15 @@ export interface GenerationResult {
   model: string;
   provider: Provider;
   usage: GenerationUsage;
+  // The exact assembled prompt this generation sent as its user message —
+  // dev-overlay provenance (lib/devMode, app/[[...address]]/dev-badge), not
+  // persisted. Identical across every fallback attempt in one call (only the
+  // model/provider vary), so it's safe to surface once per result.
+  prompt: string;
+  // Wall time of the one attempt that actually answered — excludes any
+  // earlier failed fallback attempts, so this is generation time proper, not
+  // padded by retries against dead models.
+  durationMs: number;
 }
 
 /** Whether a failed call is worth retrying on a different pool model. */
@@ -182,6 +191,10 @@ export async function generatePage(
     prev: levers.prev,
     next: levers.next,
   });
+  // Full-prompt dev logging (docs/reference/generation.md): chooseLevers()
+  // above already logs the levers; this logs the exact string sent as the
+  // user message, seams and all under book-v1, for prompt iteration.
+  devLog(`generate prompt variant=${levers.promptVariant}\n${prompt}`);
 
   const [stats, pool] = await Promise.all([getModelStats(), poolFor("generation")]);
   const freeCapActive = freeTierOnCooldown(stats);
@@ -218,18 +231,23 @@ export async function generatePage(
         messages: [{ role: "user", content: prompt }],
         ...reasoningParams(attempt.provider),
       });
-      void recordModelCall(attempt.slug, { ms: Date.now() - startedAt, ok: true });
+      const durationMs = Date.now() - startedAt;
+      void recordModelCall(attempt.slug, { ms: durationMs, ok: true });
       void markHealthy(attempt.slug, "generation");
 
       const tokens = response.usage?.total_tokens ?? 0;
       const pricePerMillion = config.modelPrices[attempt.slug] ?? 0;
       const costUsd = (tokens / 1_000_000) * pricePerMillion;
 
+      devLog(`generate ${attempt.slug} → ${tokens} tokens in ${durationMs}ms`);
+
       return {
         text: response.choices[0].message.content ?? "",
         model: attempt.slug,
         provider: attempt.provider,
         usage: { tokens, costUsd },
+        prompt,
+        durationMs,
       };
     } catch (err) {
       void recordModelCall(attempt.slug, { ms: Date.now() - startedAt, ok: false });

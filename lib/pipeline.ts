@@ -29,6 +29,16 @@ export interface PipelineResult {
   // actually cost, including regeneration/dedup retries (§10). Moderation tokens
   // are not counted (free models; the dominant cost is generation).
   usage: GenerationUsage;
+  // The exact prompt that produced `content` — dev-overlay provenance
+  // (lib/devMode), not persisted. Tracks whichever attempt (initial /
+  // moderation regen / dedup regen) ended up committed, same as `levers`.
+  prompt: string;
+  // Wall time spent in generation vs moderation, reported separately rather
+  // than folded into one total — each summed across every attempt in this
+  // run (including moderation/dedup regenerations), since a retry really did
+  // spend that time.
+  generationMs: number;
+  moderationMs: number;
 }
 
 function provenanceFrom(levers: GenerationLevers): PageProvenance {
@@ -58,29 +68,41 @@ export async function generatePipeline(
 
   // Accumulate the cost of every generation call, including retries below.
   const usage: GenerationUsage = { tokens: 0, costUsd: 0 };
-  // Runs generation for the given levers, folds in usage, and — since
-  // generatePage() may fall back to a different pool model on a retryable
-  // error — updates `levers.model`/`levers.provider` in place so provenance
-  // always names the model that actually produced the content, not just the
-  // one requested.
-  const run = async (l: GenerationLevers): Promise<string> => {
+  let generationMs = 0;
+  let moderationMs = 0;
+  // Runs generation for the given levers, folds in usage and generation
+  // time, and — since generatePage() may fall back to a different pool
+  // model on a retryable error — updates `levers.model`/`levers.provider` in
+  // place so provenance always names the model that actually produced the
+  // content, not just the one requested. Also returns the exact prompt sent,
+  // for the caller to track alongside content (dev-overlay provenance).
+  const run = async (l: GenerationLevers): Promise<{ text: string; prompt: string }> => {
     const result = await generatePage(l);
     usage.tokens += result.usage.tokens;
     usage.costUsd += result.usage.costUsd;
+    generationMs += result.durationMs;
     l.model = result.model;
     l.provider = result.provider;
-    return result.text;
+    return { text: result.text, prompt: result.prompt };
+  };
+  // Runs moderation and folds in its wall time, kept separate from generation
+  // time above (dev-overlay provenance — see PipelineResult).
+  const check = async (text: string): Promise<boolean> => {
+    const result = await moderate(text);
+    moderationMs += result.ms;
+    return result.ok;
   };
 
-  // Track levers alongside content so provenance always matches what we commit.
+  // Track levers and the prompt that produced them alongside content, so
+  // provenance always matches what we commit.
   let levers = await chooseLevers(overrides);
-  let content = await run(levers);
+  let { text: content, prompt } = await run(levers);
 
-  if (!(await moderate(content)).ok) {
+  if (!(await check(content))) {
     // Moderation fail → regenerate once with fresh levers (architecture §7).
     levers = await chooseLevers(overrides);
-    content = await run(levers);
-    if (!(await moderate(content)).ok) {
+    ({ text: content, prompt } = await run(levers));
+    if (!(await check(content))) {
       // Two rejects in a row. We never store failing content, but we no longer
       // permanently dark-shelf the address — flag it and bail so resolvePage
       // releases the reservation and a later visit retries (§7). A recurring
@@ -96,12 +118,20 @@ export async function generatePipeline(
   // duplicates are allowed by design — no dark-shelving for a mere collision).
   if (await contentExistsElsewhere(hashContent(content), address)) {
     const dedupLevers = await chooseLevers(overrides);
-    const dedupContent = await run(dedupLevers);
-    if ((await moderate(dedupContent)).ok) {
+    const dedupRun = await run(dedupLevers);
+    if (await check(dedupRun.text)) {
       levers = dedupLevers;
-      content = dedupContent;
+      content = dedupRun.text;
+      prompt = dedupRun.prompt;
     }
   }
 
-  return { content, provenance: provenanceFrom(levers), usage };
+  return {
+    content,
+    provenance: provenanceFrom(levers),
+    usage,
+    prompt,
+    generationMs,
+    moderationMs,
+  };
 }

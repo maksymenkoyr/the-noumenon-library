@@ -36,10 +36,21 @@ export interface ResolvedPage {
   text: string;
   // Dev-overlay provenance (lib/devMode, app/[[...address]]/dev-badge), ignored
   // by non-dev callers. `model` is present whenever known — a fresh generation
-  // and a committed revisit alike; `durationMs` is measured live during a fresh
-  // generation only, so revisits (never re-timed) leave it undefined.
+  // and a committed revisit alike; the timings are measured live during a
+  // fresh generation only (kept as separate generation/moderation totals
+  // rather than one combined number), so revisits leave them undefined.
   model?: string;
-  durationMs?: number;
+  generationMs?: number;
+  moderationMs?: number;
+  // The exact prompt sent for this generation, plus the levers that produced
+  // it — fresh-generation only. The prompt is never persisted, and for
+  // book-v1 it depends on the neighbors/seam-case at generation time, so a
+  // revisit has no way to reconstruct the original exactly; the overlay
+  // simply omits it rather than showing something approximate.
+  prompt?: string;
+  promptVariant?: string;
+  form?: string;
+  temperature?: number;
 }
 
 const TAKEN_DOWN_PLACEHOLDER =
@@ -112,7 +123,6 @@ async function generateAndCommit(
   await noteGeneration(ctx);
 
   try {
-    const startedAt = Date.now();
     // Books experiment (docs/reference/books.md): resolve the book row + condensed
     // neighbors before generating. Aux LLM cost (lazy neighbor condensation,
     // and the post-commit calls below) accumulates here so recordSpend sees it.
@@ -122,8 +132,8 @@ async function generateAndCommit(
       const addr = normalizeAddress(address.split("/"));
       if (addr) bookCtx = await resolveBookContext(addr, auxUsage);
     }
-    const { content, provenance, usage } = await generatePipeline(address, bookCtx);
-    const durationMs = Date.now() - startedAt;
+    const { content, provenance, usage, prompt, generationMs, moderationMs } =
+      await generatePipeline(address, bookCtx);
     await commitPage(address, content, provenance);
     if (bookCtx) {
       // Post-commit, awaited but non-fatal — the page is already live, and
@@ -147,7 +157,17 @@ async function generateAndCommit(
       tokens: usage.tokens + auxUsage.tokens,
       costUsd: usage.costUsd + auxUsage.costUsd,
     });
-    return { status: "ok", text: content, model: provenance.model, durationMs };
+    return {
+      status: "ok",
+      text: content,
+      model: provenance.model,
+      generationMs,
+      moderationMs,
+      prompt,
+      promptVariant: provenance.prompt_variant,
+      form: provenance.seed_word,
+      temperature: provenance.temperature,
+    };
   } catch (error) {
     // Unwedge the address so the next visitor becomes the first visitor. Covers
     // provider errors, an undetermined moderation result (lib/moderate throws),
