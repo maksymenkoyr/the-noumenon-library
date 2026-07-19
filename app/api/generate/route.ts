@@ -8,7 +8,7 @@ export const maxDuration = 60; // Hobby cap; generations run 8–32s
 
 export async function GET() {
   const address = formatAddress(randomAddress());
-  const { status, text, model, generationMs, moderationMs, moderationModel } =
+  const { status, text, model, generationMs, moderationMs, moderationModel, prompt } =
     await resolvePage(address, { clientIp: await getClientIp() });
   return NextResponse.json({
     address,
@@ -18,5 +18,6 @@ export async function GET() {
     generationMs,
     moderationMs,
     moderationModel,
+    prompt,
   });
 }
