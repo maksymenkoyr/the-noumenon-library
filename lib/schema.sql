@@ -97,6 +97,21 @@ ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS dev_mode BOOLEAN NOT NULL DEF
 UPDATE access_tokens SET redeemed_ip = NULL
  WHERE redeemed_ip IS NOT NULL AND redeemed_ip !~ '^[0-9a-f]{64}$';
 
+-- Redemption history: one row per invite per distinct place it was redeemed
+-- from (app/api/access upserts on each click). Place-level, not per-visit —
+-- repeat clicks from the same place bump `uses` rather than adding rows, so
+-- the table stays bounded and no visit timeline is recorded. Privacy posture
+-- unchanged from redeemed_ip above: salted hashes only (lib/ipHash), never
+-- the raw IP.
+CREATE TABLE IF NOT EXISTS invite_redemptions (
+  token      TEXT NOT NULL REFERENCES access_tokens(token),
+  ip_hash    TEXT NOT NULL,             -- salted hash (lib/ipHash), never the raw IP
+  first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  uses       BIGINT NOT NULL DEFAULT 1, -- clicks from this place, not visits
+  PRIMARY KEY (token, ip_hash)
+);
+
 -- Reader signals (docs/architecture.md §8 "engagement", Phase 10). Two idioms,
 -- both mirroring existing counter tables above:
 

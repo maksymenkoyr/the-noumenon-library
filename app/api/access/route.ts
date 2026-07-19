@@ -46,6 +46,19 @@ export async function GET(request: NextRequest) {
   );
   if (rows.length === 0) return denied(); // unknown token
 
+  // Redemption history: one row per (token, place) in invite_redemptions —
+  // repeat clicks from the same place bump `uses` instead of adding rows
+  // (schema.sql). Single-statement upsert, so concurrent redemptions can't
+  // lose a count.
+  if (ip) {
+    await query(
+      `INSERT INTO invite_redemptions (token, ip_hash) VALUES ($1, $2)
+       ON CONFLICT (token, ip_hash)
+       DO UPDATE SET last_seen = now(), uses = invite_redemptions.uses + 1`,
+      [token, ipHash(ip)],
+    );
+  }
+
   const response = NextResponse.redirect(new URL("/", request.url));
   // Bake the invite's dev / operator grants into the signed cookie, so both
   // checks stay a stateless read (lib/devMode, lib/operatorMode) — no
