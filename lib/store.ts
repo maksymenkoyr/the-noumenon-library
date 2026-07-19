@@ -97,16 +97,23 @@ export async function reclaimStaleReservation(
   return rows.length > 0;
 }
 
-/** Write the final page state and release the reservation. */
+/**
+ * Write the final page state and release the reservation. Returns whether a
+ * row was actually committed. Guarded to 'generating' rows so a commit can
+ * only ever complete the reservation it belongs to: a takedown that landed
+ * mid-generation is never resurrected to 'ok' (docs/reference/legal.md), and a
+ * reservation released or reclaimed by another request isn't overwritten.
+ * On false the caller must not present its content as committed.
+ */
 export async function commitPage(
   address: string,
   content: string,
   provenance: PageProvenance,
-): Promise<void> {
+): Promise<boolean> {
   const contentHash = hashContent(content);
   // seed_word now carries the form/register lever (docs/reference/generation.md); it stays
   // nullable, so callers that don't set it (e.g. tests) simply leave it null.
-  await query(
+  const rows = await query(
     `UPDATE pages SET
        status = 'ok',
        content = $2,
@@ -116,7 +123,8 @@ export async function commitPage(
        temperature = $6,
        seed_word = $7,
        committed_at = now()
-     WHERE address = $1`,
+     WHERE address = $1 AND status = 'generating'
+     RETURNING address`,
     [
       address,
       content,
@@ -127,6 +135,7 @@ export async function commitPage(
       provenance.seed_word ?? null,
     ],
   );
+  return rows.length > 0;
 }
 
 /**

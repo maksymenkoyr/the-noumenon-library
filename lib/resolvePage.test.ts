@@ -36,7 +36,7 @@ vi.mock("./pipeline", () => ({
 import { closePool, query } from "./db";
 import { generatePipeline } from "./pipeline";
 import { resolvePage } from "./resolvePage";
-import { getPage, reservePage } from "./store";
+import { getPage, reservePage, takeDownPage } from "./store";
 
 const generateMock = vi.mocked(generatePipeline);
 
@@ -135,6 +135,33 @@ describe("resolvePage lifecycle", () => {
     const page = await resolvePage("e/1/1/1/1");
     expect(page.text).toBe("page for e/1/1/1/1");
     expect(generateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a takedown that lands mid-generation win over the commit", async () => {
+    // The takedown arrives while the pipeline is running; the commit must not
+    // resurrect the page to 'ok' (docs/reference/legal.md "never regenerates").
+    generateMock.mockImplementationOnce(async (address: string) => {
+      await takeDownPage(address);
+      return {
+        content: `page for ${address}`,
+        provenance: { model: "test-model", temperature: 0.9, prompt_variant: "base-v1" },
+        usage: { tokens: 100, costUsd: 0 },
+        prompt: `prompt for ${address}`,
+        generationMs: 500,
+        moderationMs: 50,
+      };
+    });
+    const page = await resolvePage("f/1/1/1/1");
+    expect(page.status).toBe("taken_down");
+    const row = await getPage("f/1/1/1/1");
+    expect(row?.status).toBe("taken_down");
+    expect(row?.content).toBeNull();
+    // The LLM call still happened, so its spend is recorded regardless.
+    const rows = await query<{ tokens: string }>(
+      "SELECT tokens FROM monthly_spend WHERE month = $1",
+      [currentMonth],
+    );
+    expect(Number(rows[0]?.tokens)).toBe(100);
   });
 
   it("returns the taken-down placeholder for a taken_down page", async () => {

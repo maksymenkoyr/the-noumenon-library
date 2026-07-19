@@ -79,6 +79,34 @@ describe("commitPage / getPage", () => {
   it("returns null for a never-seen address", async () => {
     expect(await getPage("never/1/1/1/1")).toBeNull();
   });
+
+  it("returns true when the commit lands on its reservation", async () => {
+    await reservePage(ADDR);
+    expect(await commitPage(ADDR, "text", { model: "m" })).toBe(true);
+  });
+
+  it("refuses to overwrite a takedown that landed mid-generation", async () => {
+    await reservePage(ADDR);
+    await takeDownPage(ADDR); // takedown wins the race
+    expect(await commitPage(ADDR, "resurrected text", { model: "m" })).toBe(false);
+    const row = await getPage(ADDR);
+    expect(row?.status).toBe("taken_down");
+    expect(row?.content).toBeNull();
+  });
+
+  it("reports a lost commit when the reservation was released", async () => {
+    await reservePage(ADDR);
+    await releaseReservation(ADDR);
+    expect(await commitPage(ADDR, "text", { model: "m" })).toBe(false);
+    expect(await getPage(ADDR)).toBeNull();
+  });
+
+  it("refuses to overwrite an already-committed page", async () => {
+    await reservePage(ADDR);
+    await commitPage(ADDR, "first", { model: "m" });
+    expect(await commitPage(ADDR, "second", { model: "m" })).toBe(false);
+    expect((await getPage(ADDR))?.content).toBe("first");
+  });
 });
 
 describe("reclaimStaleReservation", () => {

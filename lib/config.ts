@@ -113,7 +113,7 @@ export const config = {
   // any page crystallized while this is off is persisted UNMODERATED
   // (docs/reference/architecture.md §7).
   moderationEnabled: process.env.MODERATION_ENABLED
-    ? process.env.MODERATION_ENABLED  === "true"
+    ? process.env.MODERATION_ENABLED === "true"
     : true,
   // Generation entropy levers (docs/reference/generation.md, architecture.md §6).
   // Temperature starts coherent (the library drifts stranger over geological
@@ -149,7 +149,11 @@ export const config = {
   // old default accounted for a reasoning model's long blank-pause latency,
   // which no longer applies.
   staleReservationSeconds: numeric("STALE_RESERVATION_SECONDS", 90),
-  generationWaitSeconds: numeric("GENERATION_WAIT_SECONDS", 300),
+  // Must stay below the route's maxDuration (60s on the Hobby tier —
+  // app/[[...address]]/page.tsx): a waiter that outlives the function gets a
+  // platform 504 instead of the graceful timeout path, and holds one of the
+  // pool's 3 connections the whole time. Lowered 300 → 50 accordingly.
+  generationWaitSeconds: numeric("GENERATION_WAIT_SECONDS", 50),
   waitPollIntervalMs: numeric("WAIT_POLL_INTERVAL_MS", 750),
   // Economics & safety controls (docs/reference/architecture.md §10, Phase 6). Enforced at
   // admission control in lib/economics.ts, backed by Postgres counters.

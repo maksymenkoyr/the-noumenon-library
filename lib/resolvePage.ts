@@ -137,7 +137,21 @@ async function generateAndCommit(
     }
     const { content, provenance, usage, prompt, generationMs, moderationMs, moderationModel } =
       await generatePipeline(address, bookCtx);
-    await commitPage(address, content, provenance);
+    if (!(await commitPage(address, content, provenance))) {
+      // The reservation is gone or no longer 'generating' — a takedown landed
+      // mid-generation (which must win, docs/reference/legal.md), or the row was
+      // released/reclaimed by another request. The LLM spend still happened,
+      // so record it, then serve whatever the store holds now rather than
+      // presenting the orphaned content as committed.
+      await recordSpend({
+        tokens: usage.tokens + auxUsage.tokens,
+        costUsd: usage.costUsd + auxUsage.costUsd,
+      });
+      await monitor("commit_lost", { address });
+      const row = await getPage(address);
+      if (row && row.status !== "generating") return resolved(row);
+      return { status: "explore", text: EXPLORE_ONLY_PLACEHOLDER };
+    }
     if (bookCtx) {
       // Post-commit, awaited but non-fatal — the page is already live, and
       // detaching would drop the work when a serverless function freezes.
