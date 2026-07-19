@@ -7,19 +7,16 @@
  * this page" framing made the model narrate *being* a page ("I am a page, thin
  * and quiet…"), the self-orientation the "you do not know what you are" phrase
  * was meant to prevent. Here the not-knowing is re-aimed at the page ("what it
- * is"), and each page is given a random **form/register** (`GENERATION_FORMS`)
- * so pages diverge instead of converging on one voice — the main prompt-side
- * variety lever while model rotation is pinned to a single model.
+ * is"). Variety comes from model rotation and temperature jitter rather than
+ * a prompt-side lever.
  *
  * The text is still framed as *found*, not written to order (frees the model
  * from intentionality); anti-patterns in docs/reference/generation.md are respected. The
- * chosen variant id and form are logged per page as provenance (the form in the
- * reserved `seed_word` column).
+ * chosen variant id is logged per page as provenance.
  */
 
 export interface PromptContext {
   maxWords: number;
-  form: string;
   // Books experiment (docs/reference/books.md): condensed neighbor pages in the same
   // volume, present only when already committed. Their first/last sentences
   // are near-verbatim (lib/condense.ts), so the seam constraint the model
@@ -32,49 +29,9 @@ export interface PromptContext {
 type PromptBuilder = (ctx: PromptContext) => string;
 
 /**
- * The kinds of text a page might turn out to be — chosen at random per page to
- * spread output across registers (factual / interior / formal / vernacular).
- * Each entry carries its own article so it slots after "reads like ".
- */
-export const GENERATION_FORMS: readonly string[] = [
-  "a field guide entry",
-  "an unsent letter",
-  "a prayer",
-  "a recipe",
-  "a ship's log",
-  "a legal statute",
-  "a lullaby",
-  "a transcript of an argument",
-  "an obituary",
-  "marginalia scrawled in an older book",
-  "a weather report",
-  "a museum placard",
-  "a diary entry",
-  "a fragment of a myth",
-  "a set of assembly instructions",
-  "a confession",
-  "a menu",
-  "a scientific abstract",
-  "a folk remedy",
-  "an incantation",
-  "a telegram",
-  "a classified advertisement",
-  "a eulogy",
-  "a dream written down on waking",
-  "an inventory",
-  "a riddle",
-  "a travelogue",
-  "a court testimony",
-  "a horoscope",
-  "an epitaph",
-  "a saint's life",
-  "a customer complaint",
-];
-
-/**
- * Books experiment (docs/reference/books.md): the volume is a book with a locked form,
- * and a page connects to its committed neighbors via their condensed text.
- * Four cases, one variant slug (the case is recoverable from which neighbors
+ * Books experiment (docs/reference/books.md): the volume is a book, and a
+ * page connects to its committed neighbors via their condensed text. Four
+ * cases, one variant slug (the case is recoverable from which neighbors
  * existed at generation time). The self-narration lessons hold throughout:
  * the model stays a *reader*, the not-knowing is aimed at the book, no
  * coordinate ever appears, and every neighbor block carries an explicit
@@ -84,7 +41,7 @@ const BOOK_INTRO =
   "An endless library holds every text that could ever be written, bound " +
   "into volumes.";
 
-function bookV1({ maxWords, form, prev, next }: PromptContext): string {
+function bookV1({ maxWords, prev, next }: PromptContext): string {
   if (prev && next) {
     return [
       `${BOOK_INTRO} You are reading a book from it, and one leaf sits ` +
@@ -104,8 +61,8 @@ function bookV1({ maxWords, form, prev, next }: PromptContext): string {
       "Set down exactly what is on the page between them. It is the same " +
         "text going on: it takes up where the first passage leaves off, and " +
         "its final words lead naturally into the second passage's opening — " +
-        "without repeating, quoting, or remarking on either. The writing in " +
-        `this book reads like ${form}. No more than about ${maxWords} words.`,
+        "without repeating, quoting, or remarking on either. No more than " +
+        `about ${maxWords} words.`,
     ].join("\n");
   }
   if (prev) {
@@ -121,9 +78,8 @@ function bookV1({ maxWords, form, prev, next }: PromptContext): string {
       "Set down exactly what is on the page now in front of you. It is the " +
         "same text going on: it takes up where the words above leave off, " +
         "without repeating them, without summarizing them, and without " +
-        `remarking on them. The writing in this book reads like ${form}. ` +
-        `No more than about ${maxWords} words, and the page must end at a ` +
-        "natural resting point — never cut off mid-thought.",
+        `remarking on them. No more than about ${maxWords} words, and the ` +
+        "page must end at a natural resting point — never cut off mid-thought.",
     ].join("\n");
   }
   if (next) {
@@ -139,8 +95,7 @@ function bookV1({ maxWords, form, prev, next }: PromptContext): string {
       "Set down exactly what is on the page in front of you, the page " +
         "BEFORE the one above. It is the same text: its final words must " +
         "lead naturally into the opening words above, without quoting them, " +
-        "repeating them, or remarking on them. The writing in this book " +
-        `reads like ${form}. No more than about ${maxWords} words.`,
+        `repeating them, or remarking on them. No more than about ${maxWords} words.`,
     ].join("\n");
   }
   return [
@@ -148,22 +103,22 @@ function bookV1({ maxWords, form, prev, next }: PromptContext): string {
       "exactly what is on it. You do not know what the book is or where " +
       "it sits.",
     "",
-    `The writing in this book reads like ${form}. The page may be a brief ` +
-      `fragment or fill the leaf, but no more than about ${maxWords} words, ` +
-      "and it must read as a finished whole — never cut off mid-thought.",
+    `The page may be a brief fragment or fill the leaf, but no more than ` +
+      `about ${maxWords} words, and it must read as a finished whole — ` +
+      "never cut off mid-thought.",
   ].join("\n");
 }
 
 const VARIANTS: Record<string, PromptBuilder> = {
-  "base-v2": ({ maxWords, form }) =>
+  "base-v2": ({ maxWords }) =>
     [
       "An endless library holds every text that could ever be written. You are " +
         "reading one page from it; set down exactly what is on it. You do not " +
         "know what it is or where it sits.",
       "",
-      `The writing on this page reads like ${form}. It may be a brief fragment ` +
-        `or fill the leaf, but no more than about ${maxWords} words, and it ` +
-        "must read as a finished whole — never cut off mid-thought.",
+      "It may be a brief fragment or fill the leaf, but no more than about " +
+        `${maxWords} words, and it must read as a finished whole — never cut ` +
+        "off mid-thought.",
     ].join("\n"),
   "book-v1": bookV1,
 };

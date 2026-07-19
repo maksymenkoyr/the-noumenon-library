@@ -94,8 +94,6 @@ describe("generatePipeline", () => {
     expect(result.provenance.model).toBeTruthy();
     expect(result.provenance.temperature).toBeGreaterThan(0);
     expect(result.provenance.prompt_variant).toBe("base-v2");
-    // The form/register lever is logged (in the seed_word column).
-    expect(result.provenance.seed_word).toBeTruthy();
     // The exact prompt that produced the committed content (dev-overlay
     // provenance, lib/resolvePage.ts / lib/devMode).
     expect(result.prompt).toBe("prompt for: a unique page");
@@ -198,7 +196,6 @@ describe("generatePipeline with a book context (books experiment)", () => {
     volumeKey: "pipe/1/1/1",
     book: {
       volume_key: "pipe/1/1/1",
-      form: "a prayer",
       title: null,
       tags: null,
       model: null,
@@ -210,19 +207,17 @@ describe("generatePipeline with a book context (books experiment)", () => {
     next: "By morning the coast was gone.\n…\nThe log ends here.",
   };
 
-  it("pins the locked form, book variant, and neighbor seams as levers", async () => {
+  it("pins the book variant and neighbor seams as levers", async () => {
     generateMock.mockResolvedValue(gen("a book page"));
     const result = await generatePipeline(ADDR, bookCtx);
 
     expect(result.provenance.prompt_variant).toBe("book-v1");
-    expect(result.provenance.seed_word).toBe("a prayer");
     const levers = generateMock.mock.calls[0][0];
-    expect(levers.form).toBe("a prayer");
     expect(levers.prev).toBe(bookCtx.prev);
     expect(levers.next).toBe(bookCtx.next);
   });
 
-  it("keeps the locked form and seams across moderation and dedup regens", async () => {
+  it("keeps the variant and seams across moderation and dedup regens", async () => {
     await seedExistingPage("other/1/1/1/1", "colliding content");
     generateMock
       .mockResolvedValueOnce(gen("flagged content")) // moderation reject
@@ -236,10 +231,8 @@ describe("generatePipeline with a book context (books experiment)", () => {
 
     expect(result.content).toBe("a fresh book page");
     expect(result.provenance.prompt_variant).toBe("book-v1");
-    expect(result.provenance.seed_word).toBe("a prayer");
     // Every attempt — initial, moderation regen, dedup regen — stayed in-book.
     for (const [levers] of generateMock.mock.calls) {
-      expect(levers.form).toBe("a prayer");
       expect(levers.promptVariant).toBe("book-v1");
       expect(levers.prev).toBe(bookCtx.prev);
       expect(levers.next).toBe(bookCtx.next);

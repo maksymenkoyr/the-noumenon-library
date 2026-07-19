@@ -14,7 +14,6 @@ import { monitor } from "./monitor";
 import { getClient, reasoningParams } from "./providers";
 import {
   BOOK_PROMPT_VARIANT,
-  GENERATION_FORMS,
   buildBookMetadataPrompt,
   parseBookMetadata,
 } from "./prompts";
@@ -30,20 +29,16 @@ import {
 
 /**
  * Book orchestration for the books experiment (docs/reference/books.md): the one module
- * that knows the whole story — volume = book, a form locked at book creation,
- * neighbor continuity via condensed committed pages, and title/tags invented
- * from the first committed page. pipeline.ts and resolvePage.ts stay thin.
+ * that knows the whole story — volume = book, neighbor continuity via
+ * condensed committed pages, and title/tags invented from the first
+ * committed page. pipeline.ts and resolvePage.ts stay thin.
  */
 
 export interface BookContext {
   volumeKey: string;
-  book: BookRow; // book.form is the locked register for every page
+  book: BookRow;
   prev?: string; // condensed prev-in-volume, when committed
   next?: string; // condensed next-in-volume, when committed
-}
-
-function pick<T>(pool: readonly T[]): T {
-  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 /**
@@ -74,10 +69,10 @@ async function neighborCondensed(
 
 /**
  * Everything book-mode generation needs before the LLM call: the book row
- * (created here on the volume's first generation, locking its form) and the
- * condensed committed neighbors. Two adjacent pages generating simultaneously
- * don't see each other (the 'ok' filter) — an accepted, eventual seam miss.
- * DB errors propagate (the caller releases the reservation and retries later,
+ * (created here on the volume's first generation) and the condensed
+ * committed neighbors. Two adjacent pages generating simultaneously don't
+ * see each other (the 'ok' filter) — an accepted, eventual seam miss. DB
+ * errors propagate (the caller releases the reservation and retries later,
  * same as any pre-commit failure).
  */
 export async function resolveBookContext(
@@ -85,7 +80,7 @@ export async function resolveBookContext(
   usage: GenerationUsage,
 ): Promise<BookContext> {
   const key = volumeKey(addr);
-  const book = await ensureBook(key, pick(GENERATION_FORMS));
+  const book = await ensureBook(key);
 
   const prevAddr = prevPageInVolume(addr);
   const nextAddr = nextPageInVolume(addr);
@@ -101,7 +96,7 @@ export async function resolveBookContext(
   const next = nextRow ? await neighborCondensed(nextRow, usage) : undefined;
 
   devLog(
-    `book ${key} form="${book.form}" prev=${prev ? "yes" : "no"} next=${next ? "yes" : "no"}`,
+    `book ${key} prev=${prev ? "yes" : "no"} next=${next ? "yes" : "no"}`,
   );
   return { volumeKey: key, book, prev, next };
 }

@@ -23,7 +23,6 @@ vi.mock("./pipeline", () => ({
         model: "test-model",
         temperature: 0.9,
         prompt_variant: "base-v1",
-        seed_word: "a field guide entry",
       },
       usage: { tokens: 100, costUsd: 0 },
       prompt: `prompt for ${address}`,
@@ -68,7 +67,6 @@ describe("resolvePage lifecycle", () => {
     expect(page.moderationMs).toBe(50);
     expect(page.prompt).toBe("prompt for a/1/1/1/1");
     expect(page.promptVariant).toBe("base-v1");
-    expect(page.form).toBe("a field guide entry");
     expect(page.temperature).toBe(0.9);
     expect(generateMock).toHaveBeenCalledTimes(1);
     const row = await getPage("a/1/1/1/1");
@@ -77,7 +75,6 @@ describe("resolvePage lifecycle", () => {
     expect(row?.model).toBeTruthy();
     expect(row?.temperature).toBe(0.9);
     expect(row?.prompt_variant).toBe("base-v1");
-    expect(row?.seed_word).toBe("a field guide entry");
   });
 
   it("revisits return the identical stored page with no LLM call", async () => {

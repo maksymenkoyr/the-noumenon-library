@@ -133,10 +133,10 @@ export const config = {
   // reasoning tokens no longer eat the budget before any page text.
   pageMaxWords: numeric("PAGE_MAX_WORDS", 400),
   maxTokens: numeric("GENERATION_MAX_TOKENS", 1000),
-  // Books experiment (docs/reference/books.md): volume = book — locked form per volume,
-  // neighbor continuity via condensed prev/next in the prompt (variant
-  // 'book-v1'). Default off; BOOK_MODE=false is a full kill switch back to
-  // isolated base-v2 generation (existing book rows are simply ignored).
+  // Books experiment (docs/reference/books.md): volume = book — neighbor
+  // continuity via condensed prev/next in the prompt (variant 'book-v1').
+  // Default off; BOOK_MODE=false is a full kill switch back to isolated
+  // base-v2 generation (existing book rows are simply ignored).
   bookMode: process.env.BOOK_MODE === "true",
   // Condensation shape (the reverse bell curve): first/last sentences are kept
   // verbatim; only the middle is summarized, to at most this many words…

@@ -15,8 +15,8 @@ vi.hoisted(() => {
   process.env.OPENROUTER_API_KEY = "test-key";
 });
 
-// Mock only the page-writing LLM call; chooseLevers stays real so the locked
-// form and book variant flow through genuine lever selection.
+// Mock only the page-writing LLM call; chooseLevers stays real so the book
+// variant flows through genuine lever selection.
 vi.mock("./generate", async () => {
   const actual = await vi.importActual<typeof import("./generate")>("./generate");
   return { ...actual, generatePage: vi.fn() };
@@ -114,28 +114,24 @@ describe("resolvePage under BOOK_MODE", () => {
 
     const row = await getPage("bk/1/1/1/5");
     expect(row?.prompt_variant).toBe("book-v1");
-    // The page was generated under the book's locked form.
-    expect(row?.seed_word).toBe(book?.form);
     // Short content is its own condensation, stored post-commit.
     expect(row?.condensed).toBe("A short page. It ends quickly.");
   });
 
-  it("a later page reuses the locked form and receives the prev seam", async () => {
+  it("a later page reuses the book variant and receives the prev seam", async () => {
     generateMock.mockResolvedValue(gen("A short page. It ends quickly."));
     await resolvePage("bk/1/1/1/5");
-    const book = await getBook("bk/1/1/1");
 
     generateMock.mockResolvedValue(gen("The tale goes on. Then it rests."));
     await resolvePage("bk/1/1/1/6");
 
     const levers = generateMock.mock.calls[1][0];
-    expect(levers.form).toBe(book?.form);
     expect(levers.promptVariant).toBe("book-v1");
     expect(levers.prev).toBe("A short page. It ends quickly.");
     expect(levers.next).toBeUndefined();
     // The book is already titled — no second metadata call.
     expect(createMock).toHaveBeenCalledTimes(1);
-    expect((await getPage("bk/1/1/1/6"))?.seed_word).toBe(book?.form);
+    expect((await getPage("bk/1/1/1/6"))?.prompt_variant).toBe("book-v1");
   });
 
   it("bridges when both neighbors are committed", async () => {

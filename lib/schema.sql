@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS pages (
   model          TEXT,                    -- e.g. 'nvidia/nemotron-3-super-120b-a12b:free'
   prompt_variant TEXT,                    -- slug of the prompt template/version used
   temperature    REAL,                    -- entropy lever, provenance
-  seed_word      TEXT,                    -- removed lever; retained nullable, left null
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   committed_at   TIMESTAMPTZ              -- when status moved to ok/taken_down
 );
@@ -22,12 +21,10 @@ CREATE INDEX IF NOT EXISTS pages_content_hash_idx ON pages (content_hash);
 -- Books experiment (docs/books.md): volume = book. One row per volume, created
 -- lazily when the volume's first page generates under BOOK_MODE. Keyed by the
 -- address prefix "gallery/wall/shelf/volume" — a prefix, not a page address,
--- so no FK to pages is possible. The form is locked at creation and reused by
--- every subsequent page in the book; title/tags are filled from the first
+-- so no FK to pages is possible. Title/tags are filled from the first
 -- committed page (post-commit call), staying NULL until that call succeeds.
 CREATE TABLE IF NOT EXISTS books (
   volume_key     TEXT PRIMARY KEY,        -- e.g. 'io-9/3/2/17'
-  form           TEXT NOT NULL,           -- locked register for every page in the book
   title          TEXT,                    -- NULL until filled from the first committed page
   tags           TEXT[],                  -- 3–5 thematic tags; NULL until filled
   model          TEXT,                    -- provenance of the title/tags call
@@ -41,6 +38,13 @@ CREATE TABLE IF NOT EXISTS books (
 -- neighbor context under BOOK_MODE. NULL for pre-book-mode pages; filled
 -- lazily on first neighbor read. Additive/idempotent.
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS condensed TEXT;
+
+-- Removed lever (form/register, docs/reference/generation.md): pages varied
+-- via model rotation and temperature jitter alone from here on; books lost
+-- their locked-per-volume register too. Idempotent drops for databases that
+-- already had these columns.
+ALTER TABLE pages DROP COLUMN IF EXISTS seed_word;
+ALTER TABLE books DROP COLUMN IF EXISTS form;
 
 -- Economics & safety controls (docs/architecture.md §10, Phase 6). The counter
 -- store is Postgres (not edge KV): the DB is already provisioned and "fine at

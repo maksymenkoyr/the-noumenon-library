@@ -147,25 +147,27 @@ describe("releaseReservation", () => {
 describe("books (books experiment)", () => {
   const VOL = "test-store/1/1/1";
 
-  it("ensureBook creates the row with its locked form", async () => {
-    const book = await ensureBook(VOL, "a ship's log");
+  it("ensureBook creates the row", async () => {
+    const book = await ensureBook(VOL);
     expect(book.volume_key).toBe(VOL);
-    expect(book.form).toBe("a ship's log");
     expect(book.title).toBeNull();
     expect(book.tags).toBeNull();
   });
 
-  it("ensureBook converges concurrent callers on one winner's form", async () => {
+  it("ensureBook converges concurrent callers on one winner's row", async () => {
     const books = await Promise.all(
-      Array.from({ length: 10 }, (_, i) => ensureBook(VOL, `form-${i}`)),
+      Array.from({ length: 10 }, () => ensureBook(VOL)),
     );
-    const forms = new Set(books.map((b) => b.form));
-    expect(forms.size).toBe(1);
-    expect((await getBook(VOL))?.form).toBe([...forms][0]);
+    // Exactly one INSERT wins (ON CONFLICT DO NOTHING); every other caller
+    // falls through to re-reading the winner's row, so every result shares
+    // the same created_at.
+    const createdAts = new Set(books.map((b) => b.created_at.getTime()));
+    expect(createdAts.size).toBe(1);
+    expect((await getBook(VOL))?.created_at.getTime()).toBe([...createdAts][0]);
   });
 
   it("fillBookMetadata fills exactly once", async () => {
-    await ensureBook(VOL, "a prayer");
+    await ensureBook(VOL);
     const prov = { model: "test-model", prompt_variant: "book-v1" };
     expect(await fillBookMetadata(VOL, "The Salt Ledger", ["sea", "debt"], prov)).toBe(true);
     expect(await fillBookMetadata(VOL, "Another Title", ["x"], prov)).toBe(false);

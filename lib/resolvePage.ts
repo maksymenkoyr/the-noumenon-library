@@ -49,7 +49,6 @@ export interface ResolvedPage {
   // simply omits it rather than showing something approximate.
   prompt?: string;
   promptVariant?: string;
-  form?: string;
   temperature?: number;
 }
 
@@ -165,7 +164,6 @@ async function generateAndCommit(
       moderationMs,
       prompt,
       promptVariant: provenance.prompt_variant,
-      form: provenance.seed_word,
       temperature: provenance.temperature,
     };
   } catch (error) {
