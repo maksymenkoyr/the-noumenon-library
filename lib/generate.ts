@@ -124,6 +124,15 @@ export interface GenerationResult {
   model: string;
   provider: Provider;
   usage: GenerationUsage;
+  // The exact assembled prompt this generation sent as its user message —
+  // dev-overlay provenance (lib/devMode, app/[[...address]]/dev-badge), not
+  // persisted. Identical across every fallback attempt in one call (only the
+  // model/provider vary), so it's safe to surface once per result.
+  prompt: string;
+  // Wall time of the one attempt that actually answered — excludes any
+  // earlier failed fallback attempts, so this is generation time proper, not
+  // padded by retries against dead models.
+  durationMs: number;
 }
 
 /** Whether a failed call is worth retrying on a different pool model. */
@@ -185,6 +194,10 @@ export async function generatePage(
     prev: levers.prev,
     next: levers.next,
   });
+  // Full-prompt dev logging (docs/reference/generation.md): chooseLevers()
+  // above already logs the levers; this logs the exact string sent as the
+  // user message, seams and all under book-v1, for prompt iteration.
+  devLog(`generate prompt variant=${levers.promptVariant}\n${prompt}`);
 
   const [stats, pool] = await Promise.all([getModelStats(), poolFor("generation")]);
   const freeCapActive = freeTierOnCooldown(stats);
@@ -222,29 +235,34 @@ export async function generatePage(
         ...reasoningParams(attempt.provider),
       });
       const text = response.choices[0]?.message.content ?? "";
+      const durationMs = Date.now() - startedAt;
       if (!text.trim()) {
         // An empty completion (truncation, upstream filtering, a glitching
         // model) must never crystallize: generate-once/store-forever would
         // make the blank leaf permanent. Treat it like any other retryable
         // model failure and fall through the rest of the pool.
-        void recordModelCall(attempt.slug, { ms: Date.now() - startedAt, ok: false });
+        void recordModelCall(attempt.slug, { ms: durationMs, ok: false });
         lastErr = new Error(`Empty completion from ${attempt.slug}`);
         if (i === attempts.length - 1) throw lastErr;
         devLog(`generate model=${attempt.slug} returned an empty completion → falling back`);
         continue;
       }
-      void recordModelCall(attempt.slug, { ms: Date.now() - startedAt, ok: true });
+      void recordModelCall(attempt.slug, { ms: durationMs, ok: true });
       void markHealthy(attempt.slug, "generation");
 
       const tokens = response.usage?.total_tokens ?? 0;
       const pricePerMillion = config.modelPrices[attempt.slug] ?? 0;
       const costUsd = (tokens / 1_000_000) * pricePerMillion;
 
+      devLog(`generate ${attempt.slug} → ${tokens} tokens in ${durationMs}ms`);
+
       return {
         text,
         model: attempt.slug,
         provider: attempt.provider,
         usage: { tokens, costUsd },
+        prompt,
+        durationMs,
       };
     } catch (err) {
       void recordModelCall(attempt.slug, { ms: Date.now() - startedAt, ok: false });

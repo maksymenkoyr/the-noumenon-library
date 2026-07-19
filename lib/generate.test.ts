@@ -14,9 +14,11 @@ vi.mock("./providers", async () => {
   return { ...actual, getClient: () => ({ chat: { completions: { create: createMock } } }) };
 });
 
+import { config } from "./config";
 import { closePool, query } from "./db";
 import { chooseLevers, generatePage, type GenerationLevers } from "./generate";
 import { FREE_TIER_KEY } from "./modelStats";
+import { buildPrompt } from "./prompts";
 
 /** A minimal fake OpenAI chat completion. */
 function completion(content: string, totalTokens = 0) {
@@ -142,6 +144,22 @@ describe("generatePage fallback", () => {
     const result = await generatePage(levers);
     expect(result.model).toBe("model-a");
     expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the exact assembled prompt it sent as the user message", async () => {
+    createMock.mockResolvedValueOnce(completion("first try", 5));
+    const result = await generatePage(levers);
+
+    const expectedPrompt = buildPrompt(levers.promptVariant, {
+      maxWords: config.pageMaxWords,
+      form: levers.form,
+      prev: levers.prev,
+      next: levers.next,
+    });
+    expect(result.prompt).toBe(expectedPrompt);
+    expect(createMock.mock.calls[0][0]).toMatchObject({
+      messages: [{ role: "user", content: expectedPrompt }],
+    });
   });
 
   it("skips a model that is already on cooldown when building the fallback list", async () => {

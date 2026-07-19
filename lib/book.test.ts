@@ -22,7 +22,7 @@ vi.mock("./generate", async () => {
   return { ...actual, generatePage: vi.fn() };
 });
 vi.mock("./moderate", () => ({
-  moderate: vi.fn(async () => ({ ok: true })),
+  moderate: vi.fn(async () => ({ ok: true, ms: 50 })),
 }));
 vi.mock("./monitor", () => ({ monitor: vi.fn() }));
 
@@ -52,6 +52,8 @@ const gen = (text: string) => ({
   model: "mock-model",
   provider: "openrouter" as const,
   usage: { tokens: 100, costUsd: 0 },
+  prompt: `prompt for: ${text}`,
+  durationMs: 500,
 });
 
 /** A fake title/tags completion. */

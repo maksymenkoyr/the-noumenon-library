@@ -47,14 +47,18 @@ afterAll(async () => {
 describe("moderate (chain)", () => {
   it("decides from the first model's clear PASS — exactly one call", async () => {
     createMock.mockResolvedValue(reply("PASS"));
-    expect(await moderate("a calm page")).toEqual({ ok: true });
+    const result = await moderate("a calm page");
+    expect(result).toMatchObject({ ok: true });
+    // Wall time spent moderating, reported separately from generation time
+    // (lib/pipeline.ts) rather than folded into one total.
+    expect(typeof result.ms).toBe("number");
     expect(createMock).toHaveBeenCalledTimes(1);
     expect(createMock.mock.calls[0][0]).toMatchObject({ model: "model-a" });
   });
 
   it("decides from the first model's clear FAIL — exactly one call", async () => {
     createMock.mockResolvedValue(reply("FAIL"));
-    expect(await moderate("bad page")).toEqual({ ok: false });
+    expect(await moderate("bad page")).toMatchObject({ ok: false });
     expect(createMock).toHaveBeenCalledTimes(1);
   });
 
@@ -62,7 +66,7 @@ describe("moderate (chain)", () => {
     createMock
       .mockResolvedValueOnce(reply("hmm, PASS or FAIL? unclear"))
       .mockResolvedValueOnce(reply("PASS"));
-    expect(await moderate("ambiguous")).toEqual({ ok: true });
+    expect(await moderate("ambiguous")).toMatchObject({ ok: true });
     expect(createMock).toHaveBeenCalledTimes(2);
     expect(createMock.mock.calls[1][0]).toMatchObject({ model: "model-b" });
   });
@@ -71,7 +75,7 @@ describe("moderate (chain)", () => {
     createMock
       .mockRejectedValueOnce(new Error("rate limited"))
       .mockResolvedValueOnce(reply("PASS"));
-    expect(await moderate("page")).toEqual({ ok: true });
+    expect(await moderate("page")).toMatchObject({ ok: true });
     expect(createMock).toHaveBeenCalledTimes(2);
   });
 
