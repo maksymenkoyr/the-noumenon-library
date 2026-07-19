@@ -6,9 +6,10 @@ import { useState } from "react";
  * Dev-mode overlay (lib/devMode): a small, fixed-corner HUD shown only to
  * visitors with the dev grant — a dev-flagged invite, or local `next dev`. It
  * always reports the model that produced the page and, on a fresh
- * generation, how long generation and moderation each took — reported
- * separately rather than as one combined total, since they're different
- * calls (revisits show model only, since neither is persisted). When the
+ * generation, the model that passed moderation plus how long generation and
+ * moderation each took — reported separately rather than as one combined
+ * total, since they're different calls (revisits show the generation model
+ * only, since nothing else is persisted). When the
  * full prompt is available (fresh generation only — lib/resolvePage.ts never
  * reconstructs it for a revisit), the badge is clickable and expands into a
  * panel showing the levers and the exact prompt sent, seams and all under
@@ -17,6 +18,7 @@ import { useState } from "react";
 export function DevBadge({
   model,
   generationMs,
+  moderationModel,
   moderationMs,
   prompt,
   promptVariant,
@@ -25,6 +27,7 @@ export function DevBadge({
 }: {
   model?: string | null;
   generationMs?: number;
+  moderationModel?: string | null;
   moderationMs?: number;
   prompt?: string;
   promptVariant?: string;
@@ -38,7 +41,8 @@ export function DevBadge({
     <>
       {model ?? "unknown model"}
       {generationMs != null && ` · gen ${(generationMs / 1000).toFixed(1)}s`}
-      {moderationMs != null && ` · mod ${(moderationMs / 1000).toFixed(1)}s`}
+      {moderationModel && ` · mod: ${moderationModel}`}
+      {moderationMs != null && ` (${(moderationMs / 1000).toFixed(1)}s)`}
     </>
   );
 

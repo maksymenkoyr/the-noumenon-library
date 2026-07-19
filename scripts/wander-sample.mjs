@@ -23,7 +23,20 @@ async function walk() {
     headers: { accept: "application/json" },
   });
   if (!res.ok) throw new Error(`${base}/api/generate → ${res.status}`);
-  return res.json(); // { address, status, text }
+  return res.json(); // { address, status, text, model, generationMs, moderationMs, moderationModel }
+}
+
+/** Render the provenance line for one page — degrades gracefully for a
+ * revisit (model only) or an unmoderated/disabled chain (no moderation model). */
+function provenanceLine({ model, generationMs, moderationMs, moderationModel }) {
+  if (!model) return null;
+  const gen =
+    generationMs != null ? `${model} (${(generationMs / 1000).toFixed(1)}s)` : model;
+  const mod =
+    moderationModel != null
+      ? `${moderationModel}${moderationMs != null ? ` (${(moderationMs / 1000).toFixed(1)}s)` : ""}`
+      : "—";
+  return `model: ${gen} · moderation: ${mod}`;
 }
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -50,10 +63,13 @@ const lines = [
 for (let i = 1; i <= count; i++) {
   process.stdout.write(`\rwalking ${i}/${count}…`);
   try {
-    const { address, status, text } = await walk();
+    const result = await walk();
+    const { address, status, text } = result;
+    const provenance = provenanceLine(result);
     lines.push(
       `### ${i}. \`${address}\`  — status: ${status}`,
       "",
+      ...(provenance ? [provenance, ""] : []),
       "score: `[ ]`  (pause / hollow / blank)",
       "",
       status === "ok" ? text : `_(${status} — no page)_`,

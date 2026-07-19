@@ -27,6 +27,10 @@ export interface ModerationResult {
   // including abstains — so callers can report generation and moderation
   // time separately instead of folding them into one combined total.
   ms: number;
+  // The chain link that returned the deciding PASS/FAIL — dev-overlay
+  // provenance (lib/devMode). Undefined when moderation is disabled (no link
+  // ever decides).
+  model?: string;
 }
 
 // One loud warning per process when the safety gate is switched off, so a
@@ -148,7 +152,7 @@ export async function moderate(text: string): Promise<ModerationResult> {
     if (verdict === "abstain") continue; // unclear reply → next link
 
     devLog(`moderate decision=${verdict === "pass" ? "PASS" : "FAIL"} (model=${row.slug})`);
-    return { ok: verdict === "pass", ms: Date.now() - startedAt };
+    return { ok: verdict === "pass", ms: Date.now() - startedAt, model: row.slug };
   }
 
   // Every link in the chain abstained, errored, or the chain was empty —
