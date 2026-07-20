@@ -61,19 +61,36 @@ describe("reservePage", () => {
 describe("commitPage / getPage", () => {
   it("stores content with its sha256 hash and provenance", async () => {
     await reservePage(ADDR);
-    await commitPage(ADDR, "the text of the page", {
+    const inputs = {
       model: "test-model",
       temperature: 0.9,
-    });
+      promptVariant: "base-v6",
+      form: "a field guide entry",
+      prompt: "the assembled prompt",
+      generationMs: 800,
+    };
+    await commitPage(ADDR, "the text of the page", inputs);
     const row = await getPage(ADDR);
     expect(row?.status).toBe("ok");
     expect(row?.content).toBe("the text of the page");
     expect(row?.content_hash).toBe(
       createHash("sha256").update("the text of the page").digest("hex"),
     );
+    // Scalar columns are the projection...
     expect(row?.model).toBe("test-model");
     expect(row?.temperature).toBe(0.9);
+    expect(row?.prompt_variant).toBe("base-v6");
+    expect(row?.seed_word).toBe("a field guide entry");
+    // ...and `inputs` is the whole record, round-tripped through JSONB.
+    expect(row?.inputs).toEqual(inputs);
     expect(row?.committed_at).not.toBeNull();
+  });
+
+  it("stores a minimal inputs record (just model) with inputs holding only that field", async () => {
+    await reservePage(ADDR);
+    await commitPage(ADDR, "text", { model: "m" });
+    const row = await getPage(ADDR);
+    expect(row?.inputs).toEqual({ model: "m" });
   });
 
   it("returns null for a never-seen address", async () => {

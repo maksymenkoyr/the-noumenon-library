@@ -42,6 +42,14 @@ CREATE TABLE IF NOT EXISTS books (
 -- lazily on first neighbor read. Additive/idempotent.
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS condensed TEXT;
 
+-- Unified generation-inputs record (lib/store.ts PageInputs): everything that
+-- produced the page — full prompt, levers, moderation model, timings — as one
+-- JSONB object. The scalar provenance columns above remain the SQL-queryable
+-- projection (the insight views read them), written from this same object at
+-- commit (lib/store.ts commitPage). NULL for rows committed before this
+-- column existed — readers degrade to the scalar columns. Additive/idempotent.
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS inputs JSONB;
+
 -- Economics & safety controls (docs/architecture.md §10, Phase 6). The counter
 -- store is Postgres (not edge KV): the DB is already provisioned and "fine at
 -- this scale" (§10), so no new infra is introduced.

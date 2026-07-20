@@ -19,16 +19,19 @@ vi.mock("./pipeline", () => ({
     await new Promise((resolve) => setTimeout(resolve, 150));
     return {
       content: `page for ${address}`,
-      provenance: {
+      inputs: {
         model: "test-model",
+        provider: "openrouter",
         temperature: 0.9,
-        prompt_variant: "base-v1",
-        seed_word: "a field guide entry",
+        promptVariant: "base-v1",
+        form: "a field guide entry",
+        constraints: [],
+        prompt: `prompt for ${address}`,
+        moderationModel: "mod-model",
+        generationMs: 500,
+        moderationMs: 50,
       },
       usage: { tokens: 100, costUsd: 0 },
-      prompt: `prompt for ${address}`,
-      generationMs: 500,
-      moderationMs: 50,
     };
   }),
 }));
@@ -78,25 +81,53 @@ describe("resolvePage lifecycle", () => {
     expect(row?.temperature).toBe(0.9);
     expect(row?.prompt_variant).toBe("base-v1");
     expect(row?.seed_word).toBe("a field guide entry");
+    // The full generation-inputs record round-trips through the JSONB column.
+    expect(row?.inputs).toMatchObject({
+      model: "test-model",
+      promptVariant: "base-v1",
+      form: "a field guide entry",
+      temperature: 0.9,
+      prompt: "prompt for a/1/1/1/1",
+      generationMs: 500,
+    });
   });
 
-  it("revisits return the identical stored page with no LLM call", async () => {
+  it("revisits return the identical stored page, inputs included, with no LLM call", async () => {
     const first = await resolvePage("b/1/1/1/1");
     const second = await resolvePage("b/1/1/1/1");
-    // The stored page is identical (status/text/model); only the live-measured
-    // generationMs/moderationMs differ — present on the fresh generation, absent on revisit.
+    // The stored inputs record means a revisit surfaces the same dev-overlay
+    // data a fresh generation would — not just status/text/model.
     expect(second).toMatchObject({
       status: first.status,
       text: first.text,
       model: first.model,
     });
-    expect(second.generationMs).toBeUndefined();
-    expect(second.moderationMs).toBeUndefined();
-    // The prompt is never persisted, and for book-v1 it depends on neighbors
-    // at generation time — a revisit has no way to reconstruct it exactly, so
-    // the overlay omits it rather than showing something approximate.
-    expect(second.prompt).toBeUndefined();
+    expect(second.generationMs).toBe(500);
+    expect(second.moderationMs).toBe(50);
+    expect(second.moderationModel).toBe("mod-model");
+    expect(second.prompt).toBe("prompt for b/1/1/1/1");
+    expect(second.promptVariant).toBe("base-v1");
+    expect(second.form).toBe("a field guide entry");
+    expect(second.temperature).toBe(0.9);
     expect(generateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("degrades to a model-only page for a legacy row with no stored inputs", async () => {
+    await query(
+      `INSERT INTO pages (address, status, content, content_hash, model, committed_at)
+       VALUES ($1, 'ok', $2, $3, $4, now())`,
+      ["legacy/1/1/1/1", "old content", "0".repeat(64), "old-model"],
+    );
+    const page = await resolvePage("legacy/1/1/1/1");
+    expect(page).toMatchObject({ status: "ok", text: "old content", model: "old-model" });
+    expect(page.prompt).toBeUndefined();
+    expect(page.promptVariant).toBeUndefined();
+    expect(page.form).toBeUndefined();
+    expect(page.temperature).toBeUndefined();
+    expect(page.generationMs).toBeUndefined();
+    expect(page.moderationMs).toBeUndefined();
+    expect(page.moderationModel).toBeUndefined();
+    expect(generateMock).not.toHaveBeenCalled();
   });
 
   it("collapses concurrent first-visitors into exactly one generation", async () => {
@@ -144,11 +175,15 @@ describe("resolvePage lifecycle", () => {
       await takeDownPage(address);
       return {
         content: `page for ${address}`,
-        provenance: { model: "test-model", temperature: 0.9, prompt_variant: "base-v1" },
+        inputs: {
+          model: "test-model",
+          temperature: 0.9,
+          promptVariant: "base-v1",
+          prompt: `prompt for ${address}`,
+          generationMs: 500,
+          moderationMs: 50,
+        },
         usage: { tokens: 100, costUsd: 0 },
-        prompt: `prompt for ${address}`,
-        generationMs: 500,
-        moderationMs: 50,
       };
     });
     const page = await resolvePage("f/1/1/1/1");

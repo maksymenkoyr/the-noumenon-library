@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   BOOK_PROMPT_VARIANT,
   DEFAULT_PROMPT_VARIANT,
+  GENERATION_AXES,
+  GENERATION_CONSTRAINTS,
   PROMPT_VARIANT_IDS,
   buildPrompt,
   parseBookMetadata,
@@ -10,12 +12,31 @@ import {
 const ctx = { maxWords: 400, form: "a ship's log" };
 
 describe("buildPrompt", () => {
-  it("states the size constraint and injects the chosen form", () => {
+  it("states the size constraint, and the default variant carries no form label", () => {
     const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
     expect(prompt).toContain("400");
-    expect(prompt).toContain("a ship's log");
     // The not-knowing is re-aimed at the page, not the model.
     expect(prompt).toContain("You do not know what it is");
+    // base-v4 dropped the register steer: no "reads like <form>" line, and the
+    // supplied form is ignored rather than injected.
+    expect(prompt).not.toMatch(/reads like/i);
+    expect(prompt).not.toContain("a ship's log");
+  });
+
+  it("carries an always-on self-reference guard (base-v6), not a probabilistic one", () => {
+    // The "Page N of the Unbound Codex" self-titling tic used to leak whenever
+    // the no-library constraint didn't fire; base-v6 makes the guard permanent.
+    const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
+    expect(prompt).toMatch(/does not speak of itself as a page/i);
+    expect(prompt).toMatch(/give itself a page number/i);
+  });
+
+  it("still injects the form on the register-bearing base variants", () => {
+    for (const variant of ["base-v2", "base-v3"]) {
+      const prompt = buildPrompt(variant, ctx);
+      expect(prompt).toContain("a ship's log");
+      expect(prompt).toContain("reads like");
+    }
   });
 
   it("does not tell the page its address, and keeps the model as transcriber", () => {
@@ -30,6 +51,49 @@ describe("buildPrompt", () => {
 
   it("exposes the default variant in the registry", () => {
     expect(PROMPT_VARIANT_IDS).toContain(DEFAULT_PROMPT_VARIANT);
+  });
+
+  it("appends assembled facts, and omits the slot when none fired", () => {
+    const facts = ["Its verbs stay in the present tense.", "Its diction is archaic."];
+    const withFacts = buildPrompt(DEFAULT_PROMPT_VARIANT, { ...ctx, facts });
+    for (const fact of facts) expect(withFacts).toContain(fact);
+    // Facts follow the size clause inside the same paragraph.
+    expect(withFacts.indexOf(facts[0])).toBeGreaterThan(
+      withFacts.indexOf("finished whole"),
+    );
+
+    const without = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
+    for (const fact of facts) expect(without).not.toContain(fact);
+    expect(without).not.toMatch(/\s{2,}$/m);
+  });
+
+  it("keeps the no-library constraint a fact about the page, not an order", () => {
+    const { text, probability } = GENERATION_CONSTRAINTS[0];
+    // Phrased as a property of the found page (transcriber framing holds).
+    expect(text).toMatch(/happens to contain no mention/i);
+    expect(text).not.toMatch(/do not write|avoid|you must/i);
+    // The self-reference guard moved out to the always-on base-v6 line — this
+    // constraint is purely about library content now.
+    expect(text).not.toMatch(/speak of itself|address(es)? the|reading it/i);
+    expect(probability).toBeGreaterThan(0);
+    expect(probability).toBeLessThan(1);
+  });
+
+  it("renders every axis option as a fact, never a label, order, or named genre", () => {
+    for (const axis of GENERATION_AXES) {
+      expect(axis.applyProbability).toBeGreaterThan(0);
+      expect(axis.applyProbability).toBeLessThanOrEqual(1);
+      expect(axis.options.length).toBeGreaterThan(0);
+      // base-v6 steers with low-level primitives only — no top-down genre axis.
+      expect(axis.name).not.toBe("register");
+      for (const option of axis.options) {
+        const fact = axis.render(option);
+        expect(fact).toContain(option);
+        // A statement about the found page — not "reads like", not a command.
+        expect(fact).not.toMatch(/reads like|write |you must|do not/i);
+        expect(fact.trim()).toMatch(/\.$/);
+      }
+    }
   });
 
   it("throws on an unknown variant", () => {

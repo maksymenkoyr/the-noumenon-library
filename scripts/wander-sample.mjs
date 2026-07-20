@@ -23,7 +23,7 @@ async function walk() {
     headers: { accept: "application/json" },
   });
   if (!res.ok) throw new Error(`${base}/api/generate → ${res.status}`);
-  return res.json(); // { address, status, text, model, generationMs, moderationMs, moderationModel, prompt }
+  return res.json(); // { address, status, text, model, generationMs, moderationMs, moderationModel, prompt, promptVariant, axes }
 }
 
 /** Render the provenance line for one page — degrades gracefully for a
@@ -37,6 +37,13 @@ function provenanceLine({ model, generationMs, moderationMs, moderationModel }) 
       ? `${moderationModel}${moderationMs != null ? ` (${(moderationMs / 1000).toFixed(1)}s)` : ""}`
       : "—";
   return `model: ${gen} · moderation: ${mod}`;
+}
+
+/** The levers line: prompt variant (with any constraint suffix) and the
+ * sampled form-axis fingerprint. Null when neither is known (a revisit). */
+function leversLine({ promptVariant, axes }) {
+  if (!promptVariant && !axes) return null;
+  return `levers: ${promptVariant ?? "—"} · axes: ${axes ?? "none"}`;
 }
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -66,10 +73,12 @@ for (let i = 1; i <= count; i++) {
     const result = await walk();
     const { address, status, text, prompt } = result;
     const provenance = provenanceLine(result);
+    const levers = leversLine(result);
     lines.push(
       `### ${i}. \`${address}\`  — status: ${status}`,
       "",
       ...(provenance ? [provenance, ""] : []),
+      ...(levers ? [levers, ""] : []),
       "score: `[ ]`  (pause / hollow / blank)",
       "",
       status === "ok" ? text : `_(${status} — no page)_`,

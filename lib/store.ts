@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { config } from "./config";
 import { query } from "./db";
+import type { Provider } from "./providers";
 
 /**
  * The page store: generate-once, store-forever (docs/reference/architecture.md §2–§3, §8).
@@ -23,15 +24,39 @@ export interface PageRow {
   // Reverse-bell-curve digest for neighbor context (docs/reference/books.md); NULL for
   // pre-book-mode pages until condensed lazily on first neighbor read.
   condensed: string | null;
+  // The full generation-inputs record (see PageInputs below). NULL for rows
+  // committed before this column existed — readers degrade to the scalar
+  // provenance columns above.
+  inputs: PageInputs | null;
 }
 
-export interface PageProvenance {
+/**
+ * The unified generation-inputs entity — everything that went into producing
+ * a page: the exact prompt, the entropy levers, and moderation/timing
+ * metadata. Persisted whole in pages.inputs (JSONB) by commitPage, and read
+ * back on revisit so the dev overlay isn't fresh-generation-only. The scalar
+ * provenance columns (model, prompt_variant, temperature, seed_word) are a
+ * projection of this object, written from the same value at commit so the
+ * two can never drift. All fields but `model` are optional: minimal callers
+ * (older tests, book title/tag calls) may commit with just a model.
+ */
+export interface PageInputs {
   model: string;
-  prompt_variant?: string;
+  provider?: Provider;
   temperature?: number;
-  // The chosen form/register lever, stored in the reserved seed_word column
-  // (docs/reference/generation.md, architecture §8) — a seed-like input, revived.
-  seed_word?: string;
+  // provenanceVariant(levers) — includes `+id` suffixes for applied constraints.
+  promptVariant?: string;
+  // The seed_word value: the book's locked form, or else the sampled axis
+  // fingerprint (base-v5).
+  form?: string;
+  // Applied constraint ids (unsuffixed), for structured querying.
+  constraints?: string[];
+  // The exact prompt sent for whichever attempt ended up committed.
+  prompt?: string;
+  // The chain link that passed the committed content (lib/moderate.ts).
+  moderationModel?: string;
+  generationMs?: number;
+  moderationMs?: number;
 }
 
 /** SHA-256 of page content — the dedup key (docs/reference/architecture.md §8). */
@@ -108,11 +133,11 @@ export async function reclaimStaleReservation(
 export async function commitPage(
   address: string,
   content: string,
-  provenance: PageProvenance,
+  inputs: PageInputs,
 ): Promise<boolean> {
   const contentHash = hashContent(content);
-  // seed_word now carries the form/register lever (docs/reference/generation.md); it stays
-  // nullable, so callers that don't set it (e.g. tests) simply leave it null.
+  // The scalar columns are a projection of `inputs`, written from the same
+  // object so they can't drift apart (docs/reference/generation.md).
   const rows = await query(
     `UPDATE pages SET
        status = 'ok',
@@ -122,6 +147,7 @@ export async function commitPage(
        prompt_variant = $5,
        temperature = $6,
        seed_word = $7,
+       inputs = $8::jsonb,
        committed_at = now()
      WHERE address = $1 AND status = 'generating'
      RETURNING address`,
@@ -129,10 +155,11 @@ export async function commitPage(
       address,
       content,
       contentHash,
-      provenance.model,
-      provenance.prompt_variant ?? null,
-      provenance.temperature ?? null,
-      provenance.seed_word ?? null,
+      inputs.model,
+      inputs.promptVariant ?? null,
+      inputs.temperature ?? null,
+      inputs.form ?? null,
+      JSON.stringify(inputs),
     ],
   );
   return rows.length > 0;

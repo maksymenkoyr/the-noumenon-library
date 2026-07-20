@@ -12,7 +12,7 @@ import { getClientIp } from "@/lib/clientIp";
 import { config } from "@/lib/config";
 import { getDevMode } from "@/lib/devMode";
 import { getLikeCount } from "@/lib/engagement";
-import { resolvePage, type ResolvedPage } from "@/lib/resolvePage";
+import { devFields, resolvePage, type ResolvedPage } from "@/lib/resolvePage";
 import { getPage } from "@/lib/store";
 import { DevBadge } from "./dev-badge";
 import { CrystallizingLeaf, Leaf, PlaceholderLeaf } from "./leaf";
@@ -69,7 +69,7 @@ export default async function Page({
           address={canonical}
           text={existing.content ?? ""}
           devMode={devMode}
-          model={existing.model ?? undefined}
+          {...devFields(existing.inputs, existing.model)}
         />
       ) : existing?.status === "taken_down" ? (
         <PlaceholderLeaf variant="taken_down" />
@@ -160,9 +160,10 @@ async function CommittedLeaf({
   generationMs?: number;
   moderationModel?: string;
   moderationMs?: number;
-  // Fresh-generation-only dev provenance (lib/resolvePage.ts ResolvedPage);
-  // undefined on the synchronous committed-revisit render path above, so
-  // that path's DevBadge stays model-only, matching today's behavior.
+  // Dev provenance (lib/resolvePage.ts ResolvedPage / devFields); populated on
+  // both the synchronous committed-revisit path above and the streamed
+  // fresh-generation path below, sourced from the stored PageInputs record.
+  // Undefined only for rows committed before pages.inputs existed.
   prompt?: string;
   promptVariant?: string;
   form?: string;
