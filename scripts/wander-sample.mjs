@@ -23,7 +23,7 @@ async function walk() {
     headers: { accept: "application/json" },
   });
   if (!res.ok) throw new Error(`${base}/api/generate → ${res.status}`);
-  return res.json(); // { address, status, text, model, generationMs, moderationMs, moderationModel, prompt, promptVariant, axes }
+  return res.json(); // { address, status, text, model, generationMs, moderationMs, moderationModel, prompt, promptVariant }
 }
 
 /** Render the provenance line for one page — degrades gracefully for a
@@ -39,11 +39,11 @@ function provenanceLine({ model, generationMs, moderationMs, moderationModel }) 
   return `model: ${gen} · moderation: ${mod}`;
 }
 
-/** The levers line: prompt variant (with any constraint suffix) and the
- * sampled form-axis fingerprint. Null when neither is known (a revisit). */
-function leversLine({ promptVariant, axes }) {
-  if (!promptVariant && !axes) return null;
-  return `levers: ${promptVariant ?? "—"} · axes: ${axes ?? "none"}`;
+/** The levers line: prompt variant, with any applied-constraint suffix
+ * (e.g. `base-v1+no-library`). Null when unknown (a revisit). */
+function leversLine({ promptVariant }) {
+  if (!promptVariant) return null;
+  return `levers: ${promptVariant}`;
 }
 
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");

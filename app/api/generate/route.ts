@@ -17,7 +17,6 @@ export async function GET() {
     moderationModel,
     prompt,
     promptVariant,
-    form,
   } = await resolvePage(address, { clientIp: await getClientIp() });
   return NextResponse.json({
     address,
@@ -29,7 +28,5 @@ export async function GET() {
     moderationModel,
     prompt,
     promptVariant,
-    // The sampled axis fingerprint (base-v5) or book form, from seed_word.
-    axes: form,
   });
 }

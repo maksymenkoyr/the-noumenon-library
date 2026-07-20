@@ -1,15 +1,9 @@
-import { normalizeAddress } from "./address";
-import { maybeTitleBook, resolveBookContext, type BookContext } from "./book";
-import { condensePage } from "./condense";
-import { config } from "./config";
 import {
   checkAdmission,
   noteGeneration,
   recordSpend,
   type AdmissionContext,
-  type GenerationUsage,
 } from "./economics";
-import { devLog } from "./log";
 import { monitor } from "./monitor";
 import { generatePipeline } from "./pipeline";
 import {
@@ -18,7 +12,6 @@ import {
   reclaimStaleReservation,
   releaseReservation,
   reservePage,
-  setCondensed,
   waitForPage,
   type PageInputs,
   type PageRow,
@@ -46,11 +39,11 @@ export interface ResolvedPage {
   // The chain link that passed the committed content (lib/moderate.ts).
   moderationModel?: string;
   // The exact prompt sent for this generation, plus the levers that produced
-  // it. For book-v1 this reflects the neighbors/seam-case at generation time,
-  // not at revisit time.
+  // it — fresh-generation only. The prompt is never persisted, so a revisit
+  // has no way to reconstruct the original; the overlay simply omits it
+  // rather than showing something approximate.
   prompt?: string;
   promptVariant?: string;
-  form?: string;
   temperature?: number;
 }
 
@@ -70,7 +63,6 @@ export function devFields(
   | "moderationModel"
   | "prompt"
   | "promptVariant"
-  | "form"
   | "temperature"
 > {
   if (!inputs) return { model: fallbackModel ?? undefined };
@@ -81,7 +73,6 @@ export function devFields(
     moderationModel: inputs.moderationModel,
     prompt: inputs.prompt,
     promptVariant: inputs.promptVariant,
-    form: inputs.form,
     temperature: inputs.temperature,
   };
 }
@@ -156,53 +147,20 @@ async function generateAndCommit(
   await noteGeneration(ctx);
 
   try {
-    // Books experiment (docs/reference/books.md): resolve the book row + condensed
-    // neighbors before generating. Aux LLM cost (lazy neighbor condensation,
-    // and the post-commit calls below) accumulates here so recordSpend sees it.
-    const auxUsage: GenerationUsage = { tokens: 0, costUsd: 0 };
-    let bookCtx: BookContext | undefined;
-    if (config.bookMode) {
-      const addr = normalizeAddress(address.split("/"));
-      if (addr) bookCtx = await resolveBookContext(addr, auxUsage);
-    }
-    const { content, inputs, usage } = await generatePipeline(address, bookCtx);
+    const { content, inputs, usage } = await generatePipeline(address);
     if (!(await commitPage(address, content, inputs))) {
       // The reservation is gone or no longer 'generating' — a takedown landed
       // mid-generation (which must win, docs/reference/legal.md), or the row was
       // released/reclaimed by another request. The LLM spend still happened,
       // so record it, then serve whatever the store holds now rather than
       // presenting the orphaned content as committed.
-      await recordSpend({
-        tokens: usage.tokens + auxUsage.tokens,
-        costUsd: usage.costUsd + auxUsage.costUsd,
-      });
+      await recordSpend(usage);
       await monitor("commit_lost", { address });
       const row = await getPage(address);
       if (row && row.status !== "generating") return resolved(row);
       return { status: "explore", text: EXPLORE_ONLY_PLACEHOLDER };
     }
-    if (bookCtx) {
-      // Post-commit, awaited but non-fatal — the page is already live, and
-      // detaching would drop the work when a serverless function freezes.
-      // Failures degrade: condensed stays NULL (the lazy neighbor-read path
-      // backstops it) and the title retries on the volume's next page.
-      try {
-        const { condensed, usage: condenseUsage } = await condensePage(content);
-        auxUsage.tokens += condenseUsage.tokens;
-        auxUsage.costUsd += condenseUsage.costUsd;
-        await setCondensed(address, condensed);
-      } catch (error) {
-        devLog(
-          `condensed write failed for ${address} (lazy path will retry):`,
-          error instanceof Error ? error.message : error,
-        );
-      }
-      await maybeTitleBook(bookCtx.book, content, auxUsage); // never throws
-    }
-    await recordSpend({
-      tokens: usage.tokens + auxUsage.tokens,
-      costUsd: usage.costUsd + auxUsage.costUsd,
-    });
+    await recordSpend(usage);
     return { status: "ok", text: content, ...devFields(inputs) };
   } catch (error) {
     // Unwedge the address so the next visitor becomes the first visitor. Covers

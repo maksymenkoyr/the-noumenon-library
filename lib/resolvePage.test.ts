@@ -24,7 +24,6 @@ vi.mock("./pipeline", () => ({
         provider: "openrouter",
         temperature: 0.9,
         promptVariant: "base-v1",
-        form: "a field guide entry",
         constraints: [],
         prompt: `prompt for ${address}`,
         moderationModel: "mod-model",
@@ -71,7 +70,6 @@ describe("resolvePage lifecycle", () => {
     expect(page.moderationMs).toBe(50);
     expect(page.prompt).toBe("prompt for a/1/1/1/1");
     expect(page.promptVariant).toBe("base-v1");
-    expect(page.form).toBe("a field guide entry");
     expect(page.temperature).toBe(0.9);
     expect(generateMock).toHaveBeenCalledTimes(1);
     const row = await getPage("a/1/1/1/1");
@@ -80,12 +78,10 @@ describe("resolvePage lifecycle", () => {
     expect(row?.model).toBeTruthy();
     expect(row?.temperature).toBe(0.9);
     expect(row?.prompt_variant).toBe("base-v1");
-    expect(row?.seed_word).toBe("a field guide entry");
     // The full generation-inputs record round-trips through the JSONB column.
     expect(row?.inputs).toMatchObject({
       model: "test-model",
       promptVariant: "base-v1",
-      form: "a field guide entry",
       temperature: 0.9,
       prompt: "prompt for a/1/1/1/1",
       generationMs: 500,
@@ -107,7 +103,6 @@ describe("resolvePage lifecycle", () => {
     expect(second.moderationModel).toBe("mod-model");
     expect(second.prompt).toBe("prompt for b/1/1/1/1");
     expect(second.promptVariant).toBe("base-v1");
-    expect(second.form).toBe("a field guide entry");
     expect(second.temperature).toBe(0.9);
     expect(generateMock).toHaveBeenCalledTimes(1);
   });
@@ -122,7 +117,6 @@ describe("resolvePage lifecycle", () => {
     expect(page).toMatchObject({ status: "ok", text: "old content", model: "old-model" });
     expect(page.prompt).toBeUndefined();
     expect(page.promptVariant).toBeUndefined();
-    expect(page.form).toBeUndefined();
     expect(page.temperature).toBeUndefined();
     expect(page.generationMs).toBeUndefined();
     expect(page.moderationMs).toBeUndefined();

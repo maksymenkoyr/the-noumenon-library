@@ -123,7 +123,6 @@ async function PageBody({
         moderationMs={resolved.moderationMs}
         prompt={resolved.prompt}
         promptVariant={resolved.promptVariant}
-        form={resolved.form}
         temperature={resolved.temperature}
       />
     );
@@ -150,7 +149,6 @@ async function CommittedLeaf({
   moderationMs,
   prompt,
   promptVariant,
-  form,
   temperature,
 }: {
   address: string;
@@ -166,7 +164,6 @@ async function CommittedLeaf({
   // Undefined only for rows committed before pages.inputs existed.
   prompt?: string;
   promptVariant?: string;
-  form?: string;
   temperature?: number;
 }) {
   const likeCount = await getLikeCount(address);
@@ -181,7 +178,6 @@ async function CommittedLeaf({
           moderationMs={moderationMs}
           prompt={prompt}
           promptVariant={promptVariant}
-          form={form}
           temperature={temperature}
         />
       )}

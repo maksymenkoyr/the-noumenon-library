@@ -17,11 +17,8 @@ import {
   type Provider,
 } from "./providers";
 import {
-  AXIS_VARIANTS,
   buildPrompt,
-  CONSTRAINT_VARIANTS,
   DEFAULT_PROMPT_VARIANT,
-  GENERATION_AXES,
   GENERATION_CONSTRAINTS,
   type PromptConstraint,
 } from "./prompts";
@@ -31,9 +28,9 @@ import { attemptSeed, makeSeededRandom } from "./seededRandom";
 /**
  * Generation is a pure function of its levers plus model nondeterminism, and
  * every lever is persisted as provenance (docs/reference/architecture.md §6).
- * The prompt carries no address and no register label — lever *selection* is
- * seeded by the address (lib/seededRandom.ts) so the page reproduces from its
- * coordinate, while prompt-side variety comes from the sampled constraint slot
+ * The prompt carries no address — lever *selection* is seeded by the address
+ * (lib/seededRandom.ts) so the page reproduces from its coordinate, while
+ * prompt-side variety comes from the sampled constraint slot
  * (GENERATION_CONSTRAINTS) and from rotating across a pool of models (the
  * "different gravity wells" lever, docs/reference/generation.md).
  * Model selection itself lives in lib/registry.ts (model_registry, weighted
@@ -46,33 +43,9 @@ export interface GenerationLevers {
   temperature: number; // jittered around the chosen row's base temperature
   maxTokens: number; // the chosen row's max_tokens
   promptVariant: string;
-  // The locked register, book mode only (book-v1). The base path dropped the
-  // form label at base-v4, so this is undefined for ordinary pages.
-  form?: string;
-  // Dynamic constraints sampled for this page (constraint-carrying variants
-  // only; empty otherwise). Their ids ride into provenance via
-  // provenanceVariant().
+  // Dynamic constraints sampled for this page. Their ids ride into
+  // provenance via provenanceVariant().
   constraints: readonly PromptConstraint[];
-  // Combinatorial form axes sampled for this page (axis-carrying variants
-  // only; empty otherwise). Rendered into prompt facts, and fingerprinted into
-  // the seed_word provenance column via axisFingerprint().
-  axes: readonly AxisChoice[];
-  // Books experiment (docs/reference/books.md): condensed committed neighbors, passed
-  // through to the prompt. Not levers proper — continuity context — but they
-  // travel with the levers so regeneration retries keep the same seams.
-  prev?: string;
-  next?: string;
-}
-
-/**
- * Book-mode pins the form (the book's locked register) and the prompt
- * variant; model and temperature jitter stay random per attempt.
- */
-export interface LeverOverrides {
-  form?: string;
-  promptVariant?: string;
-  prev?: string;
-  next?: string;
 }
 
 /** Fisher-Yates shuffle; does not mutate the input. */
@@ -100,54 +73,9 @@ function sampleConstraints(rng: () => number): PromptConstraint[] {
   return GENERATION_CONSTRAINTS.filter((c) => rng() < c.probability);
 }
 
-/** One axis's outcome for a page: which option, and its rendered fact. */
-export interface AxisChoice {
-  name: string;
-  option: string;
-  fact: string;
-}
-
-/**
- * The most axes allowed to co-fire on one page. base-v6 steers with low-level
- * primitives, and while each stays subtle, stacking too many at once produces a
- * contrived, over-specified page ("present tense, clipped, latinate, attending
- * to smell, name-dense, as a numbered list…"). Capping keeps pages bare-to-
- * lightly-specified no matter how many axes the pool grows to.
- */
-const MAX_AXES = 3;
-
-/**
- * Sample the combinatorial form axes: each axis applies by its own
- * probability, and when it does the seed picks one option and renders it as a
- * fact sentence. Consumes rng draws in a fixed order (per axis: one apply
- * roll, then one option pick if it applied) so the outcome is a stable
- * function of the seed. If more than MAX_AXES fired, the surplus is dropped in
- * axis order — deterministic, so reproducibility from the seed still holds.
- */
-function sampleAxes(rng: () => number): AxisChoice[] {
-  const chosen: AxisChoice[] = [];
-  for (const axis of GENERATION_AXES) {
-    if (rng() >= axis.applyProbability) continue;
-    const option = axis.options[Math.floor(rng() * axis.options.length)];
-    chosen.push({ name: axis.name, option, fact: axis.render(option) });
-  }
-  return chosen.slice(0, MAX_AXES);
-}
-
-/**
- * Compact provenance fingerprint of the sampled axes for the seed_word column
- * (e.g. `tense=the past tense · diction=archaic`), so which combinations
- * produce pages worth pausing on stays queryable. Undefined when no axis
- * applied.
- */
-export function axisFingerprint(axes: readonly AxisChoice[]): string | undefined {
-  if (axes.length === 0) return undefined;
-  return axes.map((a) => `${a.name}=${a.option}`).join(" · ");
-}
-
 /**
  * The prompt_variant value persisted for a generation: the variant id plus a
- * `+id` suffix per applied constraint (e.g. `base-v3+no-library`), so the
+ * `+id` suffix per applied constraint (e.g. `base-v1+no-library`), so the
  * constraint dial stays attributable in wander reports and SQL without a
  * schema change. Only ever diverges from levers.promptVariant when a
  * constraint fired.
@@ -168,37 +96,25 @@ export function provenanceVariant(levers: GenerationLevers): string {
  *
  * Levers drawn from the seeded stream: the weighted-lottery model pick
  * (lib/registry.ts chooseGenerationModel), the per-page temperature jitter,
- * and the constraint sample. The register/form label is no longer drawn at all
- * on the base path (dropped at base-v4); it survives only as a book-mode
- * override. All of it is logged as provenance so the library's evolution stays
- * mappable.
+ * and the constraint sample. All of it is logged as provenance so the
+ * library's evolution stays mappable.
  */
 export async function chooseLevers(
   address: string,
-  overrides: LeverOverrides = {},
   attempt = 0,
 ): Promise<GenerationLevers> {
   const rng = makeSeededRandom(attemptSeed(address, attempt));
   const stats = await getModelStats();
   const chosen = await chooseGenerationModel(stats, rng);
-  const promptVariant = overrides.promptVariant ?? DEFAULT_PROMPT_VARIANT;
-  // Form is book-mode-only now; the base path carries no register label.
-  const form = overrides.form;
-  // Fixed draw order (model above, then axes, then constraints, then
-  // temperature) so a given seed always maps to the same page. Only the
-  // variants that carry each slot sample it; the rest (book-v1, pinned A/B
-  // runs of base-v2) take none, so their prompts stay byte-stable.
-  const axes = AXIS_VARIANTS.has(promptVariant) ? sampleAxes(rng) : [];
-  const constraints = CONSTRAINT_VARIANTS.has(promptVariant)
-    ? sampleConstraints(rng)
-    : [];
+  const promptVariant = DEFAULT_PROMPT_VARIANT;
+  // Fixed draw order (model above, then constraints, then temperature) so a
+  // given seed always maps to the same page.
+  const constraints = sampleConstraints(rng);
   const temperature = jitteredTemperature(chosen.temperature, rng);
   devLog(
     `generate address=${address} attempt=${attempt} model=${chosen.slug} ` +
       `provider=${chosen.provider} temp=${temperature.toFixed(2)} ` +
       `variant=${promptVariant}` +
-      (form ? ` form="${form}"` : "") +
-      (axes.length ? ` axes=[${axisFingerprint(axes)}]` : "") +
       (constraints.length
         ? ` constraints=${constraints.map((c) => c.id).join(",")}`
         : ""),
@@ -209,11 +125,7 @@ export async function chooseLevers(
     temperature,
     maxTokens: chosen.maxTokens,
     promptVariant,
-    form,
     constraints,
-    axes,
-    prev: overrides.prev,
-    next: overrides.next,
   };
 }
 
@@ -293,21 +205,14 @@ interface Attempt {
 export async function generatePage(
   levers: GenerationLevers,
 ): Promise<GenerationResult> {
-  // Page facts (base-v5): axis sentences first, then any constraint texts, in
-  // order. Legacy base-v3/base-v4 read `constraints` directly; passing both is
-  // harmless since each builder reads only its own slot.
   const constraintTexts = levers.constraints.map((c) => c.text);
   const prompt = buildPrompt(levers.promptVariant, {
     maxWords: config.pageMaxWords,
-    form: levers.form,
     constraints: constraintTexts,
-    facts: [...levers.axes.map((a) => a.fact), ...constraintTexts],
-    prev: levers.prev,
-    next: levers.next,
   });
   // Full-prompt dev logging (docs/reference/generation.md): chooseLevers()
   // above already logs the levers; this logs the exact string sent as the
-  // user message, seams and all under book-v1, for prompt iteration.
+  // user message, for prompt iteration.
   devLog(`generate prompt variant=${levers.promptVariant}\n${prompt}`);
 
   const [stats, pool] = await Promise.all([getModelStats(), poolFor("generation")]);

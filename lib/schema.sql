@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS pages (
   model          TEXT,                    -- e.g. 'nvidia/nemotron-3-super-120b-a12b:free'
   prompt_variant TEXT,                    -- slug of the prompt template/version used
   temperature    REAL,                    -- entropy lever, provenance
-  seed_word      TEXT,                    -- removed lever; retained nullable, left null
+  seed_word      TEXT,                    -- deprecated/unused (book-mode form/axis
+                                           -- fingerprint, since removed); retained nullable
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   committed_at   TIMESTAMPTZ              -- when status moved to ok/taken_down
 );
@@ -19,12 +20,9 @@ CREATE TABLE IF NOT EXISTS pages (
 -- are allowed), we only check exact collisions before commit.
 CREATE INDEX IF NOT EXISTS pages_content_hash_idx ON pages (content_hash);
 
--- Books experiment (docs/books.md): volume = book. One row per volume, created
--- lazily when the volume's first page generates under BOOK_MODE. Keyed by the
--- address prefix "gallery/wall/shelf/volume" — a prefix, not a page address,
--- so no FK to pages is possible. The form is locked at creation and reused by
--- every subsequent page in the book; title/tags are filled from the first
--- committed page (post-commit call), staying NULL until that call succeeds.
+-- Deprecated/unused: the books experiment (volume = book, BOOK_MODE) was
+-- removed from the app. Table left in place (non-destructive) rather than
+-- migrated away; safe to drop in a future migration.
 CREATE TABLE IF NOT EXISTS books (
   volume_key     TEXT PRIMARY KEY,        -- e.g. 'io-9/3/2/17'
   form           TEXT NOT NULL,           -- locked register for every page in the book
@@ -36,10 +34,8 @@ CREATE TABLE IF NOT EXISTS books (
   titled_at      TIMESTAMPTZ              -- when title/tags were filled
 );
 
--- Reverse-bell-curve condensation of a committed page (first/last sentences
--- near-verbatim, middle summarized) — computed once post-commit, read as
--- neighbor context under BOOK_MODE. NULL for pre-book-mode pages; filled
--- lazily on first neighbor read. Additive/idempotent.
+-- Deprecated/unused: condensation was part of the removed books experiment
+-- (BOOK_MODE neighbor context). Column left in place (non-destructive).
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS condensed TEXT;
 
 -- Unified generation-inputs record (lib/store.ts PageInputs): everything that

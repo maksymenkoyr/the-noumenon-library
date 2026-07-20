@@ -22,7 +22,6 @@ vi.mock("./moderate", () => ({
 // without writing JSON to the test output.
 vi.mock("./monitor", () => ({ monitor: vi.fn() }));
 
-import type { BookContext } from "./book";
 import { closePool, query } from "./db";
 import { generatePage } from "./generate";
 import { moderate } from "./moderate";
@@ -94,14 +93,9 @@ describe("generatePipeline", () => {
     expect(result.inputs.model).toBeTruthy();
     expect(result.inputs.provider).toBe("openrouter");
     expect(result.inputs.temperature).toBeGreaterThan(0);
-    // base-v6, plus a `+id` suffix per constraint that happened to fire.
-    expect(result.inputs.promptVariant).toMatch(/^base-v6(\+[a-z-]+)*$/);
+    // base-v1, plus a `+id` suffix per constraint that happened to fire.
+    expect(result.inputs.promptVariant).toMatch(/^base-v1(\+[a-z-]+)*$/);
     expect(result.inputs.constraints).toBeInstanceOf(Array);
-    // form carries the axis fingerprint when axes are enabled — but they
-    // are currently paused for base-v6 (lib/prompts.ts AXIS_VARIANTS), so it is
-    // absent here. Stays tolerant of `name=option` pairs for when they return.
-    const form = result.inputs.form;
-    expect(form === undefined || /=/.test(form)).toBe(true);
     // The exact prompt that produced the committed content (dev-overlay
     // provenance, lib/resolvePage.ts / lib/devMode).
     expect(result.inputs.prompt).toBe("prompt for: a unique page");
@@ -196,69 +190,5 @@ describe("generatePipeline", () => {
     const result = await generatePipeline(ADDR);
 
     expect(result.inputs.model).toBe("fallback-model:free");
-  });
-});
-
-describe("generatePipeline with a book context (books experiment)", () => {
-  const bookCtx: BookContext = {
-    volumeKey: "pipe/1/1/1",
-    book: {
-      volume_key: "pipe/1/1/1",
-      form: "a prayer",
-      title: null,
-      tags: null,
-      model: null,
-      prompt_variant: null,
-      created_at: new Date(),
-      titled_at: null,
-    },
-    prev: "The ship left harbor.\n…\nNo one watched it go.",
-    next: "By morning the coast was gone.\n…\nThe log ends here.",
-  };
-
-  it("pins the locked form, book variant, and neighbor seams as levers", async () => {
-    generateMock.mockResolvedValue(gen("a book page"));
-    const result = await generatePipeline(ADDR, bookCtx);
-
-    expect(result.inputs.promptVariant).toBe("book-v1");
-    expect(result.inputs.form).toBe("a prayer");
-    const levers = generateMock.mock.calls[0][0];
-    expect(levers.form).toBe("a prayer");
-    expect(levers.prev).toBe(bookCtx.prev);
-    expect(levers.next).toBe(bookCtx.next);
-  });
-
-  it("keeps the locked form and seams across moderation and dedup regens", async () => {
-    await seedExistingPage("other/1/1/1/1", "colliding content");
-    generateMock
-      .mockResolvedValueOnce(gen("flagged content")) // moderation reject
-      .mockResolvedValueOnce(gen("colliding content")) // passes, then collides
-      .mockResolvedValueOnce(gen("a fresh book page")); // dedup regen
-    moderateMock
-      .mockResolvedValueOnce({ ok: false, ms: 40 })
-      .mockResolvedValue({ ok: true, ms: 50 });
-
-    const result = await generatePipeline(ADDR, bookCtx);
-
-    expect(result.content).toBe("a fresh book page");
-    expect(result.inputs.promptVariant).toBe("book-v1");
-    expect(result.inputs.form).toBe("a prayer");
-    // Every attempt — initial, moderation regen, dedup regen — stayed in-book.
-    for (const [levers] of generateMock.mock.calls) {
-      expect(levers.form).toBe("a prayer");
-      expect(levers.promptVariant).toBe("book-v1");
-      expect(levers.prev).toBe(bookCtx.prev);
-      expect(levers.next).toBe(bookCtx.next);
-    }
-  });
-
-  it("without a book context, levers stay base-v6 with no seams", async () => {
-    generateMock.mockResolvedValue(gen("a plain page"));
-    const result = await generatePipeline(ADDR);
-
-    expect(result.inputs.promptVariant).toMatch(/^base-v6(\+[a-z-]+)*$/);
-    const levers = generateMock.mock.calls[0][0];
-    expect(levers.prev).toBeUndefined();
-    expect(levers.next).toBeUndefined();
   });
 });
