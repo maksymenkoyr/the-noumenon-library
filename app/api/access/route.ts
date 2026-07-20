@@ -4,6 +4,7 @@ import { COOKIE_NAME, GATE_HTML, signSession } from "@/lib/access";
 import { getClientIp } from "@/lib/clientIp";
 import { config } from "@/lib/config";
 import { query } from "@/lib/db";
+import { ipHash } from "@/lib/ipHash";
 
 /**
  * Invite redemption (private-share deploy). A reusable link
@@ -32,15 +33,31 @@ export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get("invite");
   if (!token) return denied();
 
+  // Stored hashed, like every other IP touchpoint (lib/ipHash) — the raw
+  // address is never persisted (docs/reference/legal.md). The hash still lets
+  // the operator see whether two redemptions came from the same place.
   const ip = await getClientIp();
   const rows = await query<{ token: string; dev_mode: boolean; operator: boolean }>(
     `UPDATE access_tokens
         SET redeemed_at = now(), redeemed_ip = $2
       WHERE token = $1
       RETURNING token, dev_mode, operator`,
-    [token, ip ?? null],
+    [token, ip ? ipHash(ip) : null],
   );
   if (rows.length === 0) return denied(); // unknown token
+
+  // Redemption history: one row per (token, place) in invite_redemptions —
+  // repeat clicks from the same place bump `uses` instead of adding rows
+  // (schema.sql). Single-statement upsert, so concurrent redemptions can't
+  // lose a count.
+  if (ip) {
+    await query(
+      `INSERT INTO invite_redemptions (token, ip_hash) VALUES ($1, $2)
+       ON CONFLICT (token, ip_hash)
+       DO UPDATE SET last_seen = now(), uses = invite_redemptions.uses + 1`,
+      [token, ipHash(ip)],
+    );
+  }
 
   const response = NextResponse.redirect(new URL("/", request.url));
   // Bake the invite's dev / operator grants into the signed cookie, so both

@@ -16,8 +16,14 @@ vi.mock("./providers", async () => {
 
 import { config } from "./config";
 import { closePool, query } from "./db";
-import { chooseLevers, generatePage, type GenerationLevers } from "./generate";
-import { buildPrompt } from "./prompts";
+import {
+  chooseLevers,
+  generatePage,
+  provenanceVariant,
+  type GenerationLevers,
+} from "./generate";
+import { FREE_TIER_KEY } from "./modelStats";
+import { buildPrompt, GENERATION_CONSTRAINTS } from "./prompts";
 
 /** A minimal fake OpenAI chat completion. */
 function completion(content: string, totalTokens = 0) {
@@ -29,8 +35,8 @@ const levers: GenerationLevers = {
   provider: "openrouter",
   temperature: 0.9,
   maxTokens: 1000,
-  promptVariant: "base-v2",
-  form: "a field guide entry",
+  promptVariant: "base-v1",
+  constraints: [],
 };
 
 beforeAll(async () => {
@@ -117,6 +123,27 @@ describe("generatePage fallback", () => {
     expect(createMock).toHaveBeenCalledTimes(2); // model-a, then model-b
   });
 
+  it("treats an empty completion as retryable and falls back", async () => {
+    // Generate-once/store-forever: a blank completion must never be returned
+    // (it would crystallize as a permanently empty leaf).
+    createMock
+      .mockResolvedValueOnce(completion("   \n", 3))
+      .mockResolvedValueOnce(completion("real text", 5));
+
+    const result = await generatePage(levers);
+
+    expect(result.text).toBe("real text");
+    expect(result.model).toBe("model-b");
+    expect(createMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws rather than returning empty text when every model comes back blank", async () => {
+    createMock.mockResolvedValue(completion(""));
+
+    await expect(generatePage(levers)).rejects.toThrow(/empty completion/i);
+    expect(createMock).toHaveBeenCalledTimes(2); // model-a, then model-b
+  });
+
   it("reports the actually-answering model in the result, not just the requested one", async () => {
     createMock.mockResolvedValueOnce(completion("first try", 5));
     const result = await generatePage(levers);
@@ -130,9 +157,7 @@ describe("generatePage fallback", () => {
 
     const expectedPrompt = buildPrompt(levers.promptVariant, {
       maxWords: config.pageMaxWords,
-      form: levers.form,
-      prev: levers.prev,
-      next: levers.next,
+      constraints: [],
     });
     expect(result.prompt).toBe(expectedPrompt);
     expect(createMock.mock.calls[0][0]).toMatchObject({
@@ -153,6 +178,31 @@ describe("generatePage fallback", () => {
     // so there's nothing left to try and the original error rethrows.
     await expect(generatePage(levers)).rejects.toThrow(/rate limited/i);
     expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not park the free tier on a paid-model 429 carrying x-ratelimit-remaining: 0", async () => {
+    // Ordinary per-model 429s commonly carry that header; only a `:free`
+    // OpenRouter slug can mean the account-wide free-models-per-day cap.
+    createMock
+      .mockRejectedValueOnce(
+        new OpenAI.APIError(
+          429,
+          undefined,
+          "rate limited",
+          new Headers({ "x-ratelimit-remaining": "0" }),
+        ),
+      )
+      .mockResolvedValueOnce(completion("fallback", 5));
+
+    await generatePage(levers);
+
+    // Give the fire-and-forget markRateLimited (had it fired) time to land.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const rows = await query(
+      "SELECT 1 FROM model_stats WHERE model = $1 AND rate_limited_until IS NOT NULL",
+      [FREE_TIER_KEY],
+    );
+    expect(rows).toHaveLength(0);
   });
 
   it("marks a 429'd model cooling so a later selection skips it", async () => {
@@ -176,29 +226,45 @@ describe("chooseLevers", () => {
       "UPDATE model_registry SET enabled = false WHERE slug = 'model-b' AND task = 'generation'",
     );
     for (let i = 0; i < 20; i++) {
-      const result = await chooseLevers();
+      const result = await chooseLevers(`addr-${i}`);
       expect(result.model).toBe("model-a");
     }
   });
 
-  it("applies book-mode overrides (locked form/variant/neighbors)", async () => {
-    const result = await chooseLevers({
-      form: "a prayer",
-      promptVariant: "book-v1",
-      prev: "prev text",
-      next: "next text",
-    });
-    expect(result.form).toBe("a prayer");
-    expect(result.promptVariant).toBe("book-v1");
-    expect(result.prev).toBe("prev text");
-    expect(result.next).toBe("next text");
+  it("defaults to base-v1", async () => {
+    const result = await chooseLevers("addr");
+    expect(result.promptVariant).toBe("base-v1");
   });
 
-  it("defaults to a random form and the base-v2 variant with no overrides", async () => {
-    const result = await chooseLevers();
-    expect(result.promptVariant).toBe("base-v2");
-    expect(result.form).toBeTruthy();
-    expect(result.prev).toBeUndefined();
-    expect(result.next).toBeUndefined();
+  it("is a reproducible function of the address (same seed → same levers)", async () => {
+    const a = await chooseLevers("gallery/1/2/3/4");
+    const b = await chooseLevers("gallery/1/2/3/4");
+    expect(b.model).toBe(a.model);
+    expect(b.temperature).toBe(a.temperature);
+    expect(b.constraints.map((c) => c.id)).toEqual(a.constraints.map((c) => c.id));
+  });
+
+  it("draws a different sample on a regeneration attempt", async () => {
+    const first = await chooseLevers("gallery/1/2/3/4", 0);
+    const retry = await chooseLevers("gallery/1/2/3/4", 1);
+    // Temperature is continuous; a different seed effectively never collides.
+    expect(retry.temperature).not.toBe(first.temperature);
+  });
+
+  it("samples constraints from the seed — deterministic, and address-dependent", async () => {
+    // Across many addresses the constraint both fires and doesn't, proving it
+    // is sampled (not always-on/off) and driven by the seed.
+    const fired = new Set<boolean>();
+    for (let i = 0; i < 50; i++) {
+      const levers = await chooseLevers(`addr-${i}`);
+      fired.add(levers.constraints.some((c) => c.id === "no-library"));
+    }
+    expect(fired).toEqual(new Set([true, false]));
+
+    // Whatever fired is reflected in the provenance variant suffix.
+    const one = await chooseLevers("addr-0");
+    const expected = "base-v1" + one.constraints.map((c) => `+${c.id}`).join("");
+    expect(provenanceVariant(one)).toBe(expected);
+    expect(GENERATION_CONSTRAINTS.length).toBeGreaterThan(0);
   });
 });

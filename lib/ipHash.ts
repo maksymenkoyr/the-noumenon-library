@@ -10,6 +10,21 @@ import { config } from "./config";
  * Shared by every IP-keyed throttle: generation admission (lib/economics.ts)
  * and reader-signal writes (lib/engagement.ts).
  */
+
+// One loud warning per process when production hashes are unsalted — a bare
+// sha256 over the ~4B IPv4 space is trivially reversible by brute force,
+// which defeats the "not reversible to the IP" posture above. Same
+// once-per-process pattern as lib/moderate.ts's disabled-gate warning.
+let warnedUnsalted = false;
+function warnUnsalted(): void {
+  if (warnedUnsalted || !config.isProduction) return;
+  warnedUnsalted = true;
+  console.warn(
+    "[noumenon] ⚠ RATE_LIMIT_SALT is unset — stored IP hashes are unsalted and effectively reversible; set a salt in production",
+  );
+}
+
 export function ipHash(ip: string): string {
+  if (!config.rateLimitSalt) warnUnsalted();
   return createHash("sha256").update(config.rateLimitSalt + ip).digest("hex");
 }

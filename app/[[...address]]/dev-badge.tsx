@@ -12,8 +12,8 @@ import { useState } from "react";
  * only, since nothing else is persisted). When the
  * full prompt is available (fresh generation only — lib/resolvePage.ts never
  * reconstructs it for a revisit), the badge is clickable and expands into a
- * panel showing the levers and the exact prompt sent, seams and all under
- * book-v1 (docs/reference/generation.md).
+ * panel showing the levers and the exact prompt sent
+ * (docs/reference/generation.md).
  */
 export function DevBadge({
   model,
@@ -22,7 +22,6 @@ export function DevBadge({
   moderationMs,
   prompt,
   promptVariant,
-  form,
   temperature,
 }: {
   model?: string | null;
@@ -31,7 +30,6 @@ export function DevBadge({
   moderationMs?: number;
   prompt?: string;
   promptVariant?: string;
-  form?: string;
   temperature?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -63,12 +61,6 @@ export function DevBadge({
               <>
                 <dt>variant</dt>
                 <dd>{promptVariant}</dd>
-              </>
-            )}
-            {form && (
-              <>
-                <dt>form</dt>
-                <dd>{form}</dd>
               </>
             )}
             {temperature != null && (

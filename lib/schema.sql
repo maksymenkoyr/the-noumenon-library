@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS pages (
   model          TEXT,                    -- e.g. 'nvidia/nemotron-3-super-120b-a12b:free'
   prompt_variant TEXT,                    -- slug of the prompt template/version used
   temperature    REAL,                    -- entropy lever, provenance
-  seed_word      TEXT,                    -- removed lever; retained nullable, left null
+  seed_word      TEXT,                    -- deprecated/unused (book-mode form/axis
+                                           -- fingerprint, since removed); retained nullable
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   committed_at   TIMESTAMPTZ              -- when status moved to ok/taken_down
 );
@@ -19,12 +20,9 @@ CREATE TABLE IF NOT EXISTS pages (
 -- are allowed), we only check exact collisions before commit.
 CREATE INDEX IF NOT EXISTS pages_content_hash_idx ON pages (content_hash);
 
--- Books experiment (docs/books.md): volume = book. One row per volume, created
--- lazily when the volume's first page generates under BOOK_MODE. Keyed by the
--- address prefix "gallery/wall/shelf/volume" — a prefix, not a page address,
--- so no FK to pages is possible. The form is locked at creation and reused by
--- every subsequent page in the book; title/tags are filled from the first
--- committed page (post-commit call), staying NULL until that call succeeds.
+-- Deprecated/unused: the books experiment (volume = book, BOOK_MODE) was
+-- removed from the app. Table left in place (non-destructive) rather than
+-- migrated away; safe to drop in a future migration.
 CREATE TABLE IF NOT EXISTS books (
   volume_key     TEXT PRIMARY KEY,        -- e.g. 'io-9/3/2/17'
   form           TEXT NOT NULL,           -- locked register for every page in the book
@@ -36,11 +34,17 @@ CREATE TABLE IF NOT EXISTS books (
   titled_at      TIMESTAMPTZ              -- when title/tags were filled
 );
 
--- Reverse-bell-curve condensation of a committed page (first/last sentences
--- near-verbatim, middle summarized) — computed once post-commit, read as
--- neighbor context under BOOK_MODE. NULL for pre-book-mode pages; filled
--- lazily on first neighbor read. Additive/idempotent.
+-- Deprecated/unused: condensation was part of the removed books experiment
+-- (BOOK_MODE neighbor context). Column left in place (non-destructive).
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS condensed TEXT;
+
+-- Unified generation-inputs record (lib/store.ts PageInputs): everything that
+-- produced the page — full prompt, levers, moderation model, timings — as one
+-- JSONB object. The scalar provenance columns above remain the SQL-queryable
+-- projection (the insight views read them), written from this same object at
+-- commit (lib/store.ts commitPage). NULL for rows committed before this
+-- column existed — readers degrade to the scalar columns. Additive/idempotent.
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS inputs JSONB;
 
 -- Economics & safety controls (docs/architecture.md §10, Phase 6). The counter
 -- store is Postgres (not edge KV): the DB is already provisioned and "fine at
@@ -81,7 +85,7 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   label       TEXT,                    -- who it was issued to (operator note)
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   redeemed_at TIMESTAMPTZ,             -- most recent successful redemption
-  redeemed_ip TEXT                     -- best-effort, for the operator's record
+  redeemed_ip TEXT                     -- salted hash (lib/ipHash), never the raw IP; best-effort, for the operator's record
 );
 
 -- Dev-mode grant: an invite flagged here redeems into a session that sees the
@@ -89,6 +93,28 @@ CREATE TABLE IF NOT EXISTS access_tokens (
 -- claim is baked into the signed cookie at redemption, so upgrading an already-
 -- redeemed link takes effect only after it is re-clicked. Additive/idempotent.
 ALTER TABLE access_tokens ADD COLUMN IF NOT EXISTS dev_mode BOOLEAN NOT NULL DEFAULT false;
+
+-- One-time privacy cleanup: redeemed_ip used to store the raw address; it is
+-- now written as a salted sha256 hex digest (lib/ipHash, app/api/access).
+-- Clear any legacy value that isn't a 64-char hex hash. Idempotent: hashed
+-- values never match the filter.
+UPDATE access_tokens SET redeemed_ip = NULL
+ WHERE redeemed_ip IS NOT NULL AND redeemed_ip !~ '^[0-9a-f]{64}$';
+
+-- Redemption history: one row per invite per distinct place it was redeemed
+-- from (app/api/access upserts on each click). Place-level, not per-visit —
+-- repeat clicks from the same place bump `uses` rather than adding rows, so
+-- the table stays bounded and no visit timeline is recorded. Privacy posture
+-- unchanged from redeemed_ip above: salted hashes only (lib/ipHash), never
+-- the raw IP.
+CREATE TABLE IF NOT EXISTS invite_redemptions (
+  token      TEXT NOT NULL REFERENCES access_tokens(token),
+  ip_hash    TEXT NOT NULL,             -- salted hash (lib/ipHash), never the raw IP
+  first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  uses       BIGINT NOT NULL DEFAULT 1, -- clicks from this place, not visits
+  PRIMARY KEY (token, ip_hash)
+);
 
 -- Reader signals (docs/architecture.md §8 "engagement", Phase 10). Two idioms,
 -- both mirroring existing counter tables above:

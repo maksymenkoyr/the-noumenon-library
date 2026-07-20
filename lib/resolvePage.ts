@@ -1,15 +1,9 @@
-import { normalizeAddress } from "./address";
-import { maybeTitleBook, resolveBookContext, type BookContext } from "./book";
-import { condensePage } from "./condense";
-import { config } from "./config";
 import {
   checkAdmission,
   noteGeneration,
   recordSpend,
   type AdmissionContext,
-  type GenerationUsage,
 } from "./economics";
-import { devLog } from "./log";
 import { monitor } from "./monitor";
 import { generatePipeline } from "./pipeline";
 import {
@@ -18,8 +12,8 @@ import {
   reclaimStaleReservation,
   releaseReservation,
   reservePage,
-  setCondensed,
   waitForPage,
+  type PageInputs,
   type PageRow,
 } from "./store";
 
@@ -35,25 +29,52 @@ export interface ResolvedPage {
   status: ResolvedStatus;
   text: string;
   // Dev-overlay provenance (lib/devMode, app/[[...address]]/dev-badge), ignored
-  // by non-dev callers. `model` is present whenever known — a fresh generation
-  // and a committed revisit alike; the timings are measured live during a
-  // fresh generation only (kept as separate generation/moderation totals
-  // rather than one combined number), so revisits leave them undefined.
+  // by non-dev callers. Sourced from the stored PageInputs record (lib/store.ts)
+  // on both a fresh generation and a committed revisit alike; only undefined
+  // for rows committed before pages.inputs existed, which degrade to a
+  // model-only badge (see `devFields` below).
   model?: string;
   generationMs?: number;
   moderationMs?: number;
-  // The chain link that passed the committed content (lib/moderate.ts) — same
-  // fresh-generation-only, non-persisted rule as the timings above.
+  // The chain link that passed the committed content (lib/moderate.ts).
   moderationModel?: string;
   // The exact prompt sent for this generation, plus the levers that produced
-  // it — fresh-generation only. The prompt is never persisted, and for
-  // book-v1 it depends on the neighbors/seam-case at generation time, so a
-  // revisit has no way to reconstruct the original exactly; the overlay
-  // simply omits it rather than showing something approximate.
+  // it — fresh-generation only. The prompt is never persisted, so a revisit
+  // has no way to reconstruct the original; the overlay simply omits it
+  // rather than showing something approximate.
   prompt?: string;
   promptVariant?: string;
-  form?: string;
   temperature?: number;
+}
+
+/**
+ * Dev-overlay fields from a stored/just-built inputs record. Falls back to
+ * the scalar model column for rows committed before pages.inputs existed
+ * (NULL inputs → model-only badge).
+ */
+export function devFields(
+  inputs: PageInputs | null | undefined,
+  fallbackModel?: string | null,
+): Pick<
+  ResolvedPage,
+  | "model"
+  | "generationMs"
+  | "moderationMs"
+  | "moderationModel"
+  | "prompt"
+  | "promptVariant"
+  | "temperature"
+> {
+  if (!inputs) return { model: fallbackModel ?? undefined };
+  return {
+    model: inputs.model ?? fallbackModel ?? undefined,
+    generationMs: inputs.generationMs,
+    moderationMs: inputs.moderationMs,
+    moderationModel: inputs.moderationModel,
+    prompt: inputs.prompt,
+    promptVariant: inputs.promptVariant,
+    temperature: inputs.temperature,
+  };
 }
 
 const TAKEN_DOWN_PLACEHOLDER =
@@ -126,52 +147,21 @@ async function generateAndCommit(
   await noteGeneration(ctx);
 
   try {
-    // Books experiment (docs/reference/books.md): resolve the book row + condensed
-    // neighbors before generating. Aux LLM cost (lazy neighbor condensation,
-    // and the post-commit calls below) accumulates here so recordSpend sees it.
-    const auxUsage: GenerationUsage = { tokens: 0, costUsd: 0 };
-    let bookCtx: BookContext | undefined;
-    if (config.bookMode) {
-      const addr = normalizeAddress(address.split("/"));
-      if (addr) bookCtx = await resolveBookContext(addr, auxUsage);
+    const { content, inputs, usage } = await generatePipeline(address);
+    if (!(await commitPage(address, content, inputs))) {
+      // The reservation is gone or no longer 'generating' — a takedown landed
+      // mid-generation (which must win, docs/reference/legal.md), or the row was
+      // released/reclaimed by another request. The LLM spend still happened,
+      // so record it, then serve whatever the store holds now rather than
+      // presenting the orphaned content as committed.
+      await recordSpend(usage);
+      await monitor("commit_lost", { address });
+      const row = await getPage(address);
+      if (row && row.status !== "generating") return resolved(row);
+      return { status: "explore", text: EXPLORE_ONLY_PLACEHOLDER };
     }
-    const { content, provenance, usage, prompt, generationMs, moderationMs, moderationModel } =
-      await generatePipeline(address, bookCtx);
-    await commitPage(address, content, provenance);
-    if (bookCtx) {
-      // Post-commit, awaited but non-fatal — the page is already live, and
-      // detaching would drop the work when a serverless function freezes.
-      // Failures degrade: condensed stays NULL (the lazy neighbor-read path
-      // backstops it) and the title retries on the volume's next page.
-      try {
-        const { condensed, usage: condenseUsage } = await condensePage(content);
-        auxUsage.tokens += condenseUsage.tokens;
-        auxUsage.costUsd += condenseUsage.costUsd;
-        await setCondensed(address, condensed);
-      } catch (error) {
-        devLog(
-          `condensed write failed for ${address} (lazy path will retry):`,
-          error instanceof Error ? error.message : error,
-        );
-      }
-      await maybeTitleBook(bookCtx.book, content, auxUsage); // never throws
-    }
-    await recordSpend({
-      tokens: usage.tokens + auxUsage.tokens,
-      costUsd: usage.costUsd + auxUsage.costUsd,
-    });
-    return {
-      status: "ok",
-      text: content,
-      model: provenance.model,
-      generationMs,
-      moderationMs,
-      moderationModel,
-      prompt,
-      promptVariant: provenance.prompt_variant,
-      form: provenance.seed_word,
-      temperature: provenance.temperature,
-    };
+    await recordSpend(usage);
+    return { status: "ok", text: content, ...devFields(inputs) };
   } catch (error) {
     // Unwedge the address so the next visitor becomes the first visitor. Covers
     // provider errors, an undetermined moderation result (lib/moderate throws),
@@ -188,10 +178,11 @@ async function generateAndCommit(
 }
 
 function resolved(row: PageRow): ResolvedPage {
-  // Revisit: the model is on the stored row; duration was never persisted
-  // (live-only), so the overlay shows model without a time.
+  // Revisit: the stored inputs record (if present) surfaces the same
+  // prompt/levers/timings a fresh generation would; old rows with no
+  // stored inputs degrade to a model-only badge (devFields).
   if (row.status === "ok")
-    return { status: "ok", text: row.content ?? "", model: row.model ?? undefined };
+    return { status: "ok", text: row.content ?? "", ...devFields(row.inputs, row.model) };
   // taken_down is the only remaining non-ok terminal state.
   return { status: "taken_down", text: TAKEN_DOWN_PLACEHOLDER };
 }

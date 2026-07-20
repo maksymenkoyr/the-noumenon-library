@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
+import { connection } from "next/server";
 import {
   addressPath,
   formatAddress,
@@ -11,7 +12,7 @@ import { getClientIp } from "@/lib/clientIp";
 import { config } from "@/lib/config";
 import { getDevMode } from "@/lib/devMode";
 import { getLikeCount } from "@/lib/engagement";
-import { resolvePage, type ResolvedPage } from "@/lib/resolvePage";
+import { devFields, resolvePage, type ResolvedPage } from "@/lib/resolvePage";
 import { getPage } from "@/lib/store";
 import { DevBadge } from "./dev-badge";
 import { CrystallizingLeaf, Leaf, PlaceholderLeaf } from "./leaf";
@@ -27,6 +28,15 @@ export default async function Page({
 }: {
   params: Promise<{ address?: string[] }>;
 }) {
+  // Force request-time rendering (same guard as app/operator/page.tsx),
+  // before anything whose result must differ per request: the bare-root
+  // redirect below would otherwise prerender with one frozen "random"
+  // address, and the committed-leaf branch touches no dynamic API when the
+  // access gate is inert in production — raw pg queries are not a dynamic
+  // signal — so Next could serve it from the full route cache, i.e. stale
+  // leaves and like counts.
+  await connection();
+
   const { address: segments } = await params;
   // The bare root is the random entry into the library.
   if (!segments) redirect(addressPath(randomAddress()));
@@ -59,7 +69,7 @@ export default async function Page({
           address={canonical}
           text={existing.content ?? ""}
           devMode={devMode}
-          model={existing.model ?? undefined}
+          {...devFields(existing.inputs, existing.model)}
         />
       ) : existing?.status === "taken_down" ? (
         <PlaceholderLeaf variant="taken_down" />
@@ -113,7 +123,6 @@ async function PageBody({
         moderationMs={resolved.moderationMs}
         prompt={resolved.prompt}
         promptVariant={resolved.promptVariant}
-        form={resolved.form}
         temperature={resolved.temperature}
       />
     );
@@ -140,7 +149,6 @@ async function CommittedLeaf({
   moderationMs,
   prompt,
   promptVariant,
-  form,
   temperature,
 }: {
   address: string;
@@ -150,12 +158,12 @@ async function CommittedLeaf({
   generationMs?: number;
   moderationModel?: string;
   moderationMs?: number;
-  // Fresh-generation-only dev provenance (lib/resolvePage.ts ResolvedPage);
-  // undefined on the synchronous committed-revisit render path above, so
-  // that path's DevBadge stays model-only, matching today's behavior.
+  // Dev provenance (lib/resolvePage.ts ResolvedPage / devFields); populated on
+  // both the synchronous committed-revisit path above and the streamed
+  // fresh-generation path below, sourced from the stored PageInputs record.
+  // Undefined only for rows committed before pages.inputs existed.
   prompt?: string;
   promptVariant?: string;
-  form?: string;
   temperature?: number;
 }) {
   const likeCount = await getLikeCount(address);
@@ -170,7 +178,6 @@ async function CommittedLeaf({
           moderationMs={moderationMs}
           prompt={prompt}
           promptVariant={promptVariant}
-          form={form}
           temperature={temperature}
         />
       )}

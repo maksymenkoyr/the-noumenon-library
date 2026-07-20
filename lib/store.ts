@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { config } from "./config";
 import { query } from "./db";
+import type { Provider } from "./providers";
 
 /**
  * The page store: generate-once, store-forever (docs/reference/architecture.md §2–§3, §8).
@@ -17,21 +18,38 @@ export interface PageRow {
   model: string | null;
   prompt_variant: string | null;
   temperature: number | null;
-  seed_word: string | null;
   created_at: Date;
   committed_at: Date | null;
-  // Reverse-bell-curve digest for neighbor context (docs/reference/books.md); NULL for
-  // pre-book-mode pages until condensed lazily on first neighbor read.
-  condensed: string | null;
+  // The full generation-inputs record (see PageInputs below). NULL for rows
+  // committed before this column existed — readers degrade to the scalar
+  // provenance columns above.
+  inputs: PageInputs | null;
 }
 
-export interface PageProvenance {
+/**
+ * The unified generation-inputs entity — everything that went into producing
+ * a page: the exact prompt, the entropy levers, and moderation/timing
+ * metadata. Persisted whole in pages.inputs (JSONB) by commitPage, and read
+ * back on revisit so the dev overlay isn't fresh-generation-only. The scalar
+ * provenance columns (model, prompt_variant, temperature) are a projection of
+ * this object, written from the same value at commit so the two can never
+ * drift. All fields but `model` are optional: minimal callers (older tests)
+ * may commit with just a model.
+ */
+export interface PageInputs {
   model: string;
-  prompt_variant?: string;
+  provider?: Provider;
   temperature?: number;
-  // The chosen form/register lever, stored in the reserved seed_word column
-  // (docs/reference/generation.md, architecture §8) — a seed-like input, revived.
-  seed_word?: string;
+  // provenanceVariant(levers) — includes `+id` suffixes for applied constraints.
+  promptVariant?: string;
+  // Applied constraint ids (unsuffixed), for structured querying.
+  constraints?: string[];
+  // The exact prompt sent for whichever attempt ended up committed.
+  prompt?: string;
+  // The chain link that passed the committed content (lib/moderate.ts).
+  moderationModel?: string;
+  generationMs?: number;
+  moderationMs?: number;
 }
 
 /** SHA-256 of page content — the dedup key (docs/reference/architecture.md §8). */
@@ -97,16 +115,23 @@ export async function reclaimStaleReservation(
   return rows.length > 0;
 }
 
-/** Write the final page state and release the reservation. */
+/**
+ * Write the final page state and release the reservation. Returns whether a
+ * row was actually committed. Guarded to 'generating' rows so a commit can
+ * only ever complete the reservation it belongs to: a takedown that landed
+ * mid-generation is never resurrected to 'ok' (docs/reference/legal.md), and a
+ * reservation released or reclaimed by another request isn't overwritten.
+ * On false the caller must not present its content as committed.
+ */
 export async function commitPage(
   address: string,
   content: string,
-  provenance: PageProvenance,
-): Promise<void> {
+  inputs: PageInputs,
+): Promise<boolean> {
   const contentHash = hashContent(content);
-  // seed_word now carries the form/register lever (docs/reference/generation.md); it stays
-  // nullable, so callers that don't set it (e.g. tests) simply leave it null.
-  await query(
+  // The scalar columns are a projection of `inputs`, written from the same
+  // object so they can't drift apart (docs/reference/generation.md).
+  const rows = await query(
     `UPDATE pages SET
        status = 'ok',
        content = $2,
@@ -114,19 +139,21 @@ export async function commitPage(
        model = $4,
        prompt_variant = $5,
        temperature = $6,
-       seed_word = $7,
+       inputs = $7::jsonb,
        committed_at = now()
-     WHERE address = $1`,
+     WHERE address = $1 AND status = 'generating'
+     RETURNING address`,
     [
       address,
       content,
       contentHash,
-      provenance.model,
-      provenance.prompt_variant ?? null,
-      provenance.temperature ?? null,
-      provenance.seed_word ?? null,
+      inputs.model,
+      inputs.promptVariant ?? null,
+      inputs.temperature ?? null,
+      JSON.stringify(inputs),
     ],
   );
+  return rows.length > 0;
 }
 
 /**
@@ -156,104 +183,6 @@ export async function releaseReservation(address: string): Promise<void> {
   await query(
     "DELETE FROM pages WHERE address = $1 AND status = 'generating'",
     [address],
-  );
-}
-
-// --- Books experiment (docs/reference/books.md): volume = book -----------------------
-
-export interface BookRow {
-  volume_key: string;
-  form: string;
-  title: string | null;
-  tags: string[] | null;
-  model: string | null;
-  prompt_variant: string | null;
-  created_at: Date;
-  titled_at: Date | null;
-}
-
-export async function getBook(volumeKey: string): Promise<BookRow | null> {
-  const rows = await query<BookRow>(
-    "SELECT * FROM books WHERE volume_key = $1",
-    [volumeKey],
-  );
-  return rows[0] ?? null;
-}
-
-/**
- * Create-or-get a book row, locking its form at creation. Race-safe the same
- * way reservePage is: of N concurrent first-pages in a volume, exactly one
- * INSERT wins and everyone re-reads the winner's form.
- */
-export async function ensureBook(
-  volumeKey: string,
-  form: string,
-): Promise<BookRow> {
-  const rows = await query<BookRow>(
-    `INSERT INTO books (volume_key, form)
-     VALUES ($1, $2)
-     ON CONFLICT (volume_key) DO NOTHING
-     RETURNING *`,
-    [volumeKey, form],
-  );
-  if (rows[0]) return rows[0];
-  const existing = await getBook(volumeKey);
-  if (!existing) throw new Error(`Book vanished after conflict: ${volumeKey}`);
-  return existing;
-}
-
-/**
- * Fill title/tags exactly once (from the book's first committed page). The
- * `title IS NULL` guard makes concurrent fillers race safely — returns whether
- * this caller won. A parse/LLM failure upstream simply leaves title NULL, and
- * the next page generated in the volume retries.
- */
-export async function fillBookMetadata(
-  volumeKey: string,
-  title: string,
-  tags: string[],
-  provenance: { model: string; prompt_variant: string },
-): Promise<boolean> {
-  const rows = await query(
-    `UPDATE books SET
-       title = $2,
-       tags = $3,
-       model = $4,
-       prompt_variant = $5,
-       titled_at = now()
-     WHERE volume_key = $1 AND title IS NULL
-     RETURNING volume_key`,
-    [volumeKey, title, tags, provenance.model, provenance.prompt_variant],
-  );
-  return rows.length > 0;
-}
-
-/**
- * Committed pages among the given addresses, one query. Only 'ok' rows —
- * a neighbor mid-generation or taken down contributes no continuity context.
- */
-export async function getCommittedPages(
-  addresses: string[],
-): Promise<PageRow[]> {
-  if (addresses.length === 0) return [];
-  return query<PageRow>(
-    "SELECT * FROM pages WHERE address = ANY($1) AND status = 'ok'",
-    [addresses],
-  );
-}
-
-/**
- * Persist a page's condensation (post-commit or lazily on neighbor read).
- * Guarded to 'ok' rows so a takedown between read and write can't resurrect
- * content into the condensed column.
- */
-export async function setCondensed(
-  address: string,
-  condensed: string,
-): Promise<void> {
-  await query(
-    "UPDATE pages SET condensed = $2 WHERE address = $1 AND status = 'ok'",
-    [address, condensed],
   );
 }
 

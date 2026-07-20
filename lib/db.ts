@@ -15,10 +15,19 @@ declare global {
 
 function getPool(): Pool {
   if (!globalThis.__noumenonPool) {
-    globalThis.__noumenonPool = new Pool({
+    const pool = new Pool({
       connectionString: config.databaseUrl,
       max: 3,
     });
+    // pg emits 'error' on idle clients when the backend drops the connection
+    // (routine with Neon's scale-to-zero / idle timeouts); without a listener
+    // that event is an uncaught exception that can crash the process. The
+    // client is already removed from the pool at that point, so logging is
+    // all that's left to do.
+    pool.on("error", (err) => {
+      console.warn("[noumenon] idle DB client error (non-fatal):", err.message);
+    });
+    globalThis.__noumenonPool = pool;
   }
   return globalThis.__noumenonPool;
 }

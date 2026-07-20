@@ -131,27 +131,6 @@ export function nextAddress(addr: Address): Address {
   };
 }
 
-/**
- * The volume prefix "gallery/wall/shelf/volume" — the `books` table key
- * under the books experiment (docs/reference/books.md), where volume = book.
- */
-export function volumeKey(addr: Address): string {
-  return `${addr.gallery}/${addr.wall}/${addr.shelf}/${addr.volume}`;
-}
-
-/**
- * Previous page within the same volume, or null on page 1. Unlike
- * nextAddress, never crosses the volume boundary — books are independent.
- */
-export function prevPageInVolume(addr: Address): Address | null {
-  return addr.page > 1 ? { ...addr, page: addr.page - 1 } : null;
-}
-
-/** Next page within the same volume, or null on page 410. */
-export function nextPageInVolume(addr: Address): Address | null {
-  return addr.page < PAGES ? { ...addr, page: addr.page + 1 } : null;
-}
-
 function randomInt(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min + 1));
 }

@@ -19,16 +19,20 @@ import {
 import {
   buildPrompt,
   DEFAULT_PROMPT_VARIANT,
-  GENERATION_FORMS,
+  GENERATION_CONSTRAINTS,
+  type PromptConstraint,
 } from "./prompts";
 import { chooseGenerationModel, markCooling, markHealthy, markUnavailable, poolFor } from "./registry";
+import { attemptSeed, makeSeededRandom } from "./seededRandom";
 
 /**
  * Generation is a pure function of its levers plus model nondeterminism, and
- * every lever is persisted as provenance (docs/reference/architecture.md §6). The page
- * is given no address and no seed word, so the prompt is identical for every
- * page — variety comes from the model's sampling and from rotating across a
- * pool of models (the "different gravity wells" lever, docs/reference/generation.md).
+ * every lever is persisted as provenance (docs/reference/architecture.md §6).
+ * The prompt carries no address — lever *selection* is seeded by the address
+ * (lib/seededRandom.ts) so the page reproduces from its coordinate, while
+ * prompt-side variety comes from the sampled constraint slot
+ * (GENERATION_CONSTRAINTS) and from rotating across a pool of models (the
+ * "different gravity wells" lever, docs/reference/generation.md).
  * Model selection itself lives in lib/registry.ts (model_registry, weighted
  * lottery); this module owns the levers, the prompt call, and per-request
  * fallback across the rest of the eligible pool on a retryable error.
@@ -39,27 +43,9 @@ export interface GenerationLevers {
   temperature: number; // jittered around the chosen row's base temperature
   maxTokens: number; // the chosen row's max_tokens
   promptVariant: string;
-  form: string;
-  // Books experiment (docs/reference/books.md): condensed committed neighbors, passed
-  // through to the prompt. Not levers proper — continuity context — but they
-  // travel with the levers so regeneration retries keep the same seams.
-  prev?: string;
-  next?: string;
-}
-
-/**
- * Book-mode pins the form (the book's locked register) and the prompt
- * variant; model and temperature jitter stay random per attempt.
- */
-export interface LeverOverrides {
-  form?: string;
-  promptVariant?: string;
-  prev?: string;
-  next?: string;
-}
-
-function pick<T>(pool: readonly T[]): T {
-  return pool[Math.floor(Math.random() * pool.length)];
+  // Dynamic constraints sampled for this page. Their ids ride into
+  // provenance via provenanceVariant().
+  constraints: readonly PromptConstraint[];
 }
 
 /** Fisher-Yates shuffle; does not mutate the input. */
@@ -77,28 +63,61 @@ function isFreeSlug(slug: string): boolean {
 }
 
 /** Base temperature ± a uniform jitter, clamped to a valid sampling range. */
-function jitteredTemperature(base: number): number {
-  const offset = (Math.random() * 2 - 1) * config.temperatureJitter;
+function jitteredTemperature(base: number, rng: () => number): number {
+  const offset = (rng() * 2 - 1) * config.temperatureJitter;
   return Math.min(2, Math.max(0.1, base + offset));
 }
 
+/** Each pool constraint applies independently, by its own probability. */
+function sampleConstraints(rng: () => number): PromptConstraint[] {
+  return GENERATION_CONSTRAINTS.filter((c) => rng() < c.probability);
+}
+
 /**
- * Pick the entropy levers for one generation: a weighted-lottery model pick
- * (lib/registry.ts chooseGenerationModel), a random form/register for the
- * page, and a per-page jittered temperature — all logged as provenance so the
- * library's own evolution stays mappable.
+ * The prompt_variant value persisted for a generation: the variant id plus a
+ * `+id` suffix per applied constraint (e.g. `base-v1+no-library`), so the
+ * constraint dial stays attributable in wander reports and SQL without a
+ * schema change. Only ever diverges from levers.promptVariant when a
+ * constraint fired.
+ */
+export function provenanceVariant(levers: GenerationLevers): string {
+  const suffix = levers.constraints.map((c) => `+${c.id}`).join("");
+  return levers.promptVariant + suffix;
+}
+
+/**
+ * Pick the entropy levers for one generation. Every draw comes from a PRNG
+ * seeded by the page's address (lib/seededRandom.ts), so the levers — and thus
+ * the page — are a reproducible function of the coordinate: the same address
+ * always crystallizes the same page (docs/reference/generation.md). A
+ * moderation- or dedup-regeneration passes a higher `attempt`, folding it into
+ * the seed so the retry deterministically draws a *different* sample instead
+ * of repeating the one that was rejected or collided.
+ *
+ * Levers drawn from the seeded stream: the weighted-lottery model pick
+ * (lib/registry.ts chooseGenerationModel), the per-page temperature jitter,
+ * and the constraint sample. All of it is logged as provenance so the
+ * library's evolution stays mappable.
  */
 export async function chooseLevers(
-  overrides: LeverOverrides = {},
+  address: string,
+  attempt = 0,
 ): Promise<GenerationLevers> {
+  const rng = makeSeededRandom(attemptSeed(address, attempt));
   const stats = await getModelStats();
-  const chosen = await chooseGenerationModel(stats);
-  const form = overrides.form ?? pick(GENERATION_FORMS);
-  const promptVariant = overrides.promptVariant ?? DEFAULT_PROMPT_VARIANT;
-  const temperature = jitteredTemperature(chosen.temperature);
+  const chosen = await chooseGenerationModel(stats, rng);
+  const promptVariant = DEFAULT_PROMPT_VARIANT;
+  // Fixed draw order (model above, then constraints, then temperature) so a
+  // given seed always maps to the same page.
+  const constraints = sampleConstraints(rng);
+  const temperature = jitteredTemperature(chosen.temperature, rng);
   devLog(
-    `generate model=${chosen.slug} provider=${chosen.provider} ` +
-      `temp=${temperature.toFixed(2)} form="${form}" variant=${promptVariant}`,
+    `generate address=${address} attempt=${attempt} model=${chosen.slug} ` +
+      `provider=${chosen.provider} temp=${temperature.toFixed(2)} ` +
+      `variant=${promptVariant}` +
+      (constraints.length
+        ? ` constraints=${constraints.map((c) => c.id).join(",")}`
+        : ""),
   );
   return {
     model: chosen.slug,
@@ -106,9 +125,7 @@ export async function chooseLevers(
     temperature,
     maxTokens: chosen.maxTokens,
     promptVariant,
-    form,
-    prev: overrides.prev,
-    next: overrides.next,
+    constraints,
   };
 }
 
@@ -148,10 +165,13 @@ function shouldFallback(err: unknown): boolean {
  * 429 — cycling the rest of the free pool doesn't help. Detected primarily by
  * message text; the `x-ratelimit-remaining: 0` header is a fallback for cases
  * where the message wording drifts. Only ever relevant to `:free`-suffixed
- * OpenRouter slugs — the seeded pool is all-paid, so this is dormant unless a
- * `:free` model is added to model_registry later.
+ * OpenRouter slugs, so the attempt is checked first — an ordinary paid-model
+ * 429 also commonly carries `x-ratelimit-remaining: 0`, and must not park
+ * the whole free tier. The seeded pool is all-paid, so this is dormant
+ * unless a `:free` model is added to model_registry later.
  */
-function isAccountFreeCap(err: unknown): boolean {
+function isAccountFreeCap(err: unknown, attempt: Attempt): boolean {
+  if (attempt.provider !== "openrouter" || !isFreeSlug(attempt.slug)) return false;
   if (!(err instanceof OpenAI.APIError) || err.status !== 429) return false;
   if (err.message?.toLowerCase().includes("free-models-per-day")) return true;
   return err.headers?.get?.("x-ratelimit-remaining") === "0";
@@ -185,15 +205,14 @@ interface Attempt {
 export async function generatePage(
   levers: GenerationLevers,
 ): Promise<GenerationResult> {
+  const constraintTexts = levers.constraints.map((c) => c.text);
   const prompt = buildPrompt(levers.promptVariant, {
     maxWords: config.pageMaxWords,
-    form: levers.form,
-    prev: levers.prev,
-    next: levers.next,
+    constraints: constraintTexts,
   });
   // Full-prompt dev logging (docs/reference/generation.md): chooseLevers()
   // above already logs the levers; this logs the exact string sent as the
-  // user message, seams and all under book-v1, for prompt iteration.
+  // user message, for prompt iteration.
   devLog(`generate prompt variant=${levers.promptVariant}\n${prompt}`);
 
   const [stats, pool] = await Promise.all([getModelStats(), poolFor("generation")]);
@@ -231,7 +250,19 @@ export async function generatePage(
         messages: [{ role: "user", content: prompt }],
         ...reasoningParams(attempt.provider),
       });
+      const text = response.choices[0]?.message.content ?? "";
       const durationMs = Date.now() - startedAt;
+      if (!text.trim()) {
+        // An empty completion (truncation, upstream filtering, a glitching
+        // model) must never crystallize: generate-once/store-forever would
+        // make the blank leaf permanent. Treat it like any other retryable
+        // model failure and fall through the rest of the pool.
+        void recordModelCall(attempt.slug, { ms: durationMs, ok: false });
+        lastErr = new Error(`Empty completion from ${attempt.slug}`);
+        if (i === attempts.length - 1) throw lastErr;
+        devLog(`generate model=${attempt.slug} returned an empty completion → falling back`);
+        continue;
+      }
       void recordModelCall(attempt.slug, { ms: durationMs, ok: true });
       void markHealthy(attempt.slug, "generation");
 
@@ -242,7 +273,7 @@ export async function generatePage(
       devLog(`generate ${attempt.slug} → ${tokens} tokens in ${durationMs}ms`);
 
       return {
-        text: response.choices[0].message.content ?? "",
+        text,
         model: attempt.slug,
         provider: attempt.provider,
         usage: { tokens, costUsd },
@@ -256,7 +287,7 @@ export async function generatePage(
       const status = errorStatus(err);
       if (status === 404) {
         void markUnavailable(attempt.slug, "generation");
-      } else if (isAccountFreeCap(err)) {
+      } else if (isAccountFreeCap(err, attempt)) {
         void markRateLimited(FREE_TIER_KEY, ACCOUNT_FREE_CAP_COOLDOWN_SECONDS);
         // The whole free tier is capped for the day — drop any remaining
         // free attempts so the loop jumps straight to the paid tail instead

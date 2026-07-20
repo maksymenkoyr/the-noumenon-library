@@ -19,16 +19,18 @@ vi.mock("./pipeline", () => ({
     await new Promise((resolve) => setTimeout(resolve, 150));
     return {
       content: `page for ${address}`,
-      provenance: {
+      inputs: {
         model: "test-model",
+        provider: "openrouter",
         temperature: 0.9,
-        prompt_variant: "base-v1",
-        seed_word: "a field guide entry",
+        promptVariant: "base-v1",
+        constraints: [],
+        prompt: `prompt for ${address}`,
+        moderationModel: "mod-model",
+        generationMs: 500,
+        moderationMs: 50,
       },
       usage: { tokens: 100, costUsd: 0 },
-      prompt: `prompt for ${address}`,
-      generationMs: 500,
-      moderationMs: 50,
     };
   }),
 }));
@@ -36,7 +38,7 @@ vi.mock("./pipeline", () => ({
 import { closePool, query } from "./db";
 import { generatePipeline } from "./pipeline";
 import { resolvePage } from "./resolvePage";
-import { getPage, reservePage } from "./store";
+import { getPage, reservePage, takeDownPage } from "./store";
 
 const generateMock = vi.mocked(generatePipeline);
 
@@ -68,7 +70,6 @@ describe("resolvePage lifecycle", () => {
     expect(page.moderationMs).toBe(50);
     expect(page.prompt).toBe("prompt for a/1/1/1/1");
     expect(page.promptVariant).toBe("base-v1");
-    expect(page.form).toBe("a field guide entry");
     expect(page.temperature).toBe(0.9);
     expect(generateMock).toHaveBeenCalledTimes(1);
     const row = await getPage("a/1/1/1/1");
@@ -77,26 +78,50 @@ describe("resolvePage lifecycle", () => {
     expect(row?.model).toBeTruthy();
     expect(row?.temperature).toBe(0.9);
     expect(row?.prompt_variant).toBe("base-v1");
-    expect(row?.seed_word).toBe("a field guide entry");
+    // The full generation-inputs record round-trips through the JSONB column.
+    expect(row?.inputs).toMatchObject({
+      model: "test-model",
+      promptVariant: "base-v1",
+      temperature: 0.9,
+      prompt: "prompt for a/1/1/1/1",
+      generationMs: 500,
+    });
   });
 
-  it("revisits return the identical stored page with no LLM call", async () => {
+  it("revisits return the identical stored page, inputs included, with no LLM call", async () => {
     const first = await resolvePage("b/1/1/1/1");
     const second = await resolvePage("b/1/1/1/1");
-    // The stored page is identical (status/text/model); only the live-measured
-    // generationMs/moderationMs differ — present on the fresh generation, absent on revisit.
+    // The stored inputs record means a revisit surfaces the same dev-overlay
+    // data a fresh generation would — not just status/text/model.
     expect(second).toMatchObject({
       status: first.status,
       text: first.text,
       model: first.model,
     });
-    expect(second.generationMs).toBeUndefined();
-    expect(second.moderationMs).toBeUndefined();
-    // The prompt is never persisted, and for book-v1 it depends on neighbors
-    // at generation time — a revisit has no way to reconstruct it exactly, so
-    // the overlay omits it rather than showing something approximate.
-    expect(second.prompt).toBeUndefined();
+    expect(second.generationMs).toBe(500);
+    expect(second.moderationMs).toBe(50);
+    expect(second.moderationModel).toBe("mod-model");
+    expect(second.prompt).toBe("prompt for b/1/1/1/1");
+    expect(second.promptVariant).toBe("base-v1");
+    expect(second.temperature).toBe(0.9);
     expect(generateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("degrades to a model-only page for a legacy row with no stored inputs", async () => {
+    await query(
+      `INSERT INTO pages (address, status, content, content_hash, model, committed_at)
+       VALUES ($1, 'ok', $2, $3, $4, now())`,
+      ["legacy/1/1/1/1", "old content", "0".repeat(64), "old-model"],
+    );
+    const page = await resolvePage("legacy/1/1/1/1");
+    expect(page).toMatchObject({ status: "ok", text: "old content", model: "old-model" });
+    expect(page.prompt).toBeUndefined();
+    expect(page.promptVariant).toBeUndefined();
+    expect(page.temperature).toBeUndefined();
+    expect(page.generationMs).toBeUndefined();
+    expect(page.moderationMs).toBeUndefined();
+    expect(page.moderationModel).toBeUndefined();
+    expect(generateMock).not.toHaveBeenCalled();
   });
 
   it("collapses concurrent first-visitors into exactly one generation", async () => {
@@ -135,6 +160,37 @@ describe("resolvePage lifecycle", () => {
     const page = await resolvePage("e/1/1/1/1");
     expect(page.text).toBe("page for e/1/1/1/1");
     expect(generateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a takedown that lands mid-generation win over the commit", async () => {
+    // The takedown arrives while the pipeline is running; the commit must not
+    // resurrect the page to 'ok' (docs/reference/legal.md "never regenerates").
+    generateMock.mockImplementationOnce(async (address: string) => {
+      await takeDownPage(address);
+      return {
+        content: `page for ${address}`,
+        inputs: {
+          model: "test-model",
+          temperature: 0.9,
+          promptVariant: "base-v1",
+          prompt: `prompt for ${address}`,
+          generationMs: 500,
+          moderationMs: 50,
+        },
+        usage: { tokens: 100, costUsd: 0 },
+      };
+    });
+    const page = await resolvePage("f/1/1/1/1");
+    expect(page.status).toBe("taken_down");
+    const row = await getPage("f/1/1/1/1");
+    expect(row?.status).toBe("taken_down");
+    expect(row?.content).toBeNull();
+    // The LLM call still happened, so its spend is recorded regardless.
+    const rows = await query<{ tokens: string }>(
+      "SELECT tokens FROM monthly_spend WHERE month = $1",
+      [currentMonth],
+    );
+    expect(Number(rows[0]?.tokens)).toBe(100);
   });
 
   it("returns the taken-down placeholder for a taken_down page", async () => {

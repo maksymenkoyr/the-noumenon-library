@@ -113,7 +113,7 @@ export const config = {
   // any page crystallized while this is off is persisted UNMODERATED
   // (docs/reference/architecture.md §7).
   moderationEnabled: process.env.MODERATION_ENABLED
-    ? process.env.MODERATION_ENABLED  === "true"
+    ? process.env.MODERATION_ENABLED === "true"
     : true,
   // Generation entropy levers (docs/reference/generation.md, architecture.md §6).
   // Temperature starts coherent (the library drifts stranger over geological
@@ -123,33 +123,21 @@ export const config = {
   // draw up to this magnitude, clamped to a sane range. A model-agnostic variety
   // lever that works even when generation is pinned to a single model. 0 = off.
   temperatureJitter: nonNegative("GENERATION_TEMPERATURE_JITTER", 0.2),
-  // Page-size constraint (docs/reference/generation.md). pageMaxWords is the real size
-  // control, stated in the prompt; maxTokens is a cost backstop for the aux
-  // generation-pool calls that don't have their own model_registry row (book
-  // title/tags, condensation — lib/book.ts, lib/condense.ts). The real
-  // per-call cap for generation/moderation proper comes from the chosen
-  // model_registry row's max_tokens (lib/registry.ts). Lowered 4000 → 1000
-  // now that reasoning is off on every call (§4 of the model-pool rework) —
-  // reasoning tokens no longer eat the budget before any page text.
+  // Page-size constraint (docs/reference/generation.md), stated in the
+  // prompt. The per-call token cap for generation/moderation comes from the
+  // chosen model_registry row's max_tokens (lib/registry.ts).
   pageMaxWords: numeric("PAGE_MAX_WORDS", 400),
-  maxTokens: numeric("GENERATION_MAX_TOKENS", 1000),
-  // Books experiment (docs/reference/books.md): volume = book — locked form per volume,
-  // neighbor continuity via condensed prev/next in the prompt (variant
-  // 'book-v1'). Default off; BOOK_MODE=false is a full kill switch back to
-  // isolated base-v2 generation (existing book rows are simply ignored).
-  bookMode: process.env.BOOK_MODE === "true",
-  // Condensation shape (the reverse bell curve): first/last sentences are kept
-  // verbatim; only the middle is summarized, to at most this many words…
-  condensedMiddleMaxWords: numeric("CONDENSED_MIDDLE_MAX_WORDS", 60),
-  // …and a middle already shorter than this is kept as-is (no LLM call).
-  condenseMinMiddleWords: numeric("CONDENSE_MIN_MIDDLE_WORDS", 60),
   // Concurrency guard tunables (docs/reference/architecture.md §3). The stale window
   // must comfortably exceed worst-case generation time. Lowered 300 → 90 now
   // that reasoning is off on every call (§4 of the model-pool rework) — the
   // old default accounted for a reasoning model's long blank-pause latency,
   // which no longer applies.
   staleReservationSeconds: numeric("STALE_RESERVATION_SECONDS", 90),
-  generationWaitSeconds: numeric("GENERATION_WAIT_SECONDS", 300),
+  // Must stay below the route's maxDuration (60s on the Hobby tier —
+  // app/[[...address]]/page.tsx): a waiter that outlives the function gets a
+  // platform 504 instead of the graceful timeout path, and holds one of the
+  // pool's 3 connections the whole time. Lowered 300 → 50 accordingly.
+  generationWaitSeconds: numeric("GENERATION_WAIT_SECONDS", 50),
   waitPollIntervalMs: numeric("WAIT_POLL_INTERVAL_MS", 750),
   // Economics & safety controls (docs/reference/architecture.md §10, Phase 6). Enforced at
   // admission control in lib/economics.ts, backed by Postgres counters.

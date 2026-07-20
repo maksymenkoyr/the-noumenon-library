@@ -13,15 +13,10 @@ vi.hoisted(() => {
 import { closePool, query } from "./db";
 import {
   commitPage,
-  ensureBook,
-  fillBookMetadata,
-  getBook,
-  getCommittedPages,
   getPage,
   reclaimStaleReservation,
   releaseReservation,
   reservePage,
-  setCondensed,
   takeDownPage,
   waitForPage,
 } from "./store";
@@ -34,10 +29,8 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   // CASCADE: pages is now FK-referenced by the reader-signal tables (page_likes,
-  // engagement); a bare TRUNCATE would error. books is keyed by an address
-  // *prefix* (no FK), so it needs its own TRUNCATE.
+  // engagement); a bare TRUNCATE would error.
   await query("TRUNCATE pages CASCADE");
-  await query("TRUNCATE books");
 });
 
 afterAll(async () => {
@@ -61,23 +54,66 @@ describe("reservePage", () => {
 describe("commitPage / getPage", () => {
   it("stores content with its sha256 hash and provenance", async () => {
     await reservePage(ADDR);
-    await commitPage(ADDR, "the text of the page", {
+    const inputs = {
       model: "test-model",
       temperature: 0.9,
-    });
+      promptVariant: "base-v1",
+      prompt: "the assembled prompt",
+      generationMs: 800,
+    };
+    await commitPage(ADDR, "the text of the page", inputs);
     const row = await getPage(ADDR);
     expect(row?.status).toBe("ok");
     expect(row?.content).toBe("the text of the page");
     expect(row?.content_hash).toBe(
       createHash("sha256").update("the text of the page").digest("hex"),
     );
+    // Scalar columns are the projection...
     expect(row?.model).toBe("test-model");
     expect(row?.temperature).toBe(0.9);
+    expect(row?.prompt_variant).toBe("base-v1");
+    // ...and `inputs` is the whole record, round-tripped through JSONB.
+    expect(row?.inputs).toEqual(inputs);
     expect(row?.committed_at).not.toBeNull();
+  });
+
+  it("stores a minimal inputs record (just model) with inputs holding only that field", async () => {
+    await reservePage(ADDR);
+    await commitPage(ADDR, "text", { model: "m" });
+    const row = await getPage(ADDR);
+    expect(row?.inputs).toEqual({ model: "m" });
   });
 
   it("returns null for a never-seen address", async () => {
     expect(await getPage("never/1/1/1/1")).toBeNull();
+  });
+
+  it("returns true when the commit lands on its reservation", async () => {
+    await reservePage(ADDR);
+    expect(await commitPage(ADDR, "text", { model: "m" })).toBe(true);
+  });
+
+  it("refuses to overwrite a takedown that landed mid-generation", async () => {
+    await reservePage(ADDR);
+    await takeDownPage(ADDR); // takedown wins the race
+    expect(await commitPage(ADDR, "resurrected text", { model: "m" })).toBe(false);
+    const row = await getPage(ADDR);
+    expect(row?.status).toBe("taken_down");
+    expect(row?.content).toBeNull();
+  });
+
+  it("reports a lost commit when the reservation was released", async () => {
+    await reservePage(ADDR);
+    await releaseReservation(ADDR);
+    expect(await commitPage(ADDR, "text", { model: "m" })).toBe(false);
+    expect(await getPage(ADDR)).toBeNull();
+  });
+
+  it("refuses to overwrite an already-committed page", async () => {
+    await reservePage(ADDR);
+    await commitPage(ADDR, "first", { model: "m" });
+    expect(await commitPage(ADDR, "second", { model: "m" })).toBe(false);
+    expect((await getPage(ADDR))?.content).toBe("first");
   });
 });
 
@@ -141,74 +177,6 @@ describe("releaseReservation", () => {
     await commitPage(ADDR, "text", { model: "m" });
     await releaseReservation(ADDR);
     expect((await getPage(ADDR))?.content).toBe("text");
-  });
-});
-
-describe("books (books experiment)", () => {
-  const VOL = "test-store/1/1/1";
-
-  it("ensureBook creates the row with its locked form", async () => {
-    const book = await ensureBook(VOL, "a ship's log");
-    expect(book.volume_key).toBe(VOL);
-    expect(book.form).toBe("a ship's log");
-    expect(book.title).toBeNull();
-    expect(book.tags).toBeNull();
-  });
-
-  it("ensureBook converges concurrent callers on one winner's form", async () => {
-    const books = await Promise.all(
-      Array.from({ length: 10 }, (_, i) => ensureBook(VOL, `form-${i}`)),
-    );
-    const forms = new Set(books.map((b) => b.form));
-    expect(forms.size).toBe(1);
-    expect((await getBook(VOL))?.form).toBe([...forms][0]);
-  });
-
-  it("fillBookMetadata fills exactly once", async () => {
-    await ensureBook(VOL, "a prayer");
-    const prov = { model: "test-model", prompt_variant: "book-v1" };
-    expect(await fillBookMetadata(VOL, "The Salt Ledger", ["sea", "debt"], prov)).toBe(true);
-    expect(await fillBookMetadata(VOL, "Another Title", ["x"], prov)).toBe(false);
-    const book = await getBook(VOL);
-    expect(book?.title).toBe("The Salt Ledger");
-    expect(book?.tags).toEqual(["sea", "debt"]);
-    expect(book?.titled_at).not.toBeNull();
-  });
-
-  it("getBook returns null for an unknown volume", async () => {
-    expect(await getBook("never/1/1/1")).toBeNull();
-  });
-});
-
-describe("getCommittedPages / setCondensed", () => {
-  const A = "test-store/1/1/1/1";
-  const B = "test-store/1/1/1/2";
-  const C = "test-store/1/1/1/3";
-
-  it("returns only committed 'ok' rows among the requested addresses", async () => {
-    await reservePage(A);
-    await commitPage(A, "alpha", { model: "m" });
-    await reservePage(B); // still generating
-    await reservePage(C);
-    await commitPage(C, "gamma", { model: "m" });
-    await takeDownPage(C);
-    const rows = await getCommittedPages([A, B, C, "never/1/1/1/1"]);
-    expect(rows.map((r) => r.address)).toEqual([A]);
-  });
-
-  it("returns empty for an empty address list without querying", async () => {
-    expect(await getCommittedPages([])).toEqual([]);
-  });
-
-  it("setCondensed persists on a committed page only", async () => {
-    await reservePage(A);
-    await commitPage(A, "alpha", { model: "m" });
-    await setCondensed(A, "alpha (condensed)");
-    expect((await getPage(A))?.condensed).toBe("alpha (condensed)");
-
-    await reservePage(B); // generating — guard must refuse
-    await setCondensed(B, "beta (condensed)");
-    expect((await getPage(B))?.condensed).toBeNull();
   });
 });
 

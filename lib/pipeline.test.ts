@@ -22,7 +22,6 @@ vi.mock("./moderate", () => ({
 // without writing JSON to the test output.
 vi.mock("./monitor", () => ({ monitor: vi.fn() }));
 
-import type { BookContext } from "./book";
 import { closePool, query } from "./db";
 import { generatePage } from "./generate";
 import { moderate } from "./moderate";
@@ -91,17 +90,18 @@ describe("generatePipeline", () => {
     const result = await generatePipeline(ADDR);
 
     expect(result.content).toBe("a unique page");
-    expect(result.provenance.model).toBeTruthy();
-    expect(result.provenance.temperature).toBeGreaterThan(0);
-    expect(result.provenance.prompt_variant).toBe("base-v2");
-    // The form/register lever is logged (in the seed_word column).
-    expect(result.provenance.seed_word).toBeTruthy();
+    expect(result.inputs.model).toBeTruthy();
+    expect(result.inputs.provider).toBe("openrouter");
+    expect(result.inputs.temperature).toBeGreaterThan(0);
+    // base-v1, plus a `+id` suffix per constraint that happened to fire.
+    expect(result.inputs.promptVariant).toMatch(/^base-v1(\+[a-z-]+)*$/);
+    expect(result.inputs.constraints).toBeInstanceOf(Array);
     // The exact prompt that produced the committed content (dev-overlay
     // provenance, lib/resolvePage.ts / lib/devMode).
-    expect(result.prompt).toBe("prompt for: a unique page");
+    expect(result.inputs.prompt).toBe("prompt for: a unique page");
     // Generation and moderation time are reported separately, not as one total.
-    expect(result.generationMs).toBe(500);
-    expect(result.moderationMs).toBe(50);
+    expect(result.inputs.generationMs).toBe(500);
+    expect(result.inputs.moderationMs).toBe(50);
     expect(generateMock).toHaveBeenCalledTimes(1);
   });
 
@@ -120,10 +120,10 @@ describe("generatePipeline", () => {
     // Usage is summed across every generation call (both attempts here).
     expect(result.usage.tokens).toBe(200);
     // The prompt tracks the committed (regenerated) attempt, not the rejected one.
-    expect(result.prompt).toBe("prompt for: clean content");
+    expect(result.inputs.prompt).toBe("prompt for: clean content");
     // Both timings sum across every attempt, including the moderation reject.
-    expect(result.generationMs).toBe(1000);
-    expect(result.moderationMs).toBe(100);
+    expect(result.inputs.generationMs).toBe(1000);
+    expect(result.inputs.moderationMs).toBe(100);
     // A single reject that recovers on regen is normal — no monitor event.
     expect(monitorMock).not.toHaveBeenCalled();
   });
@@ -151,7 +151,7 @@ describe("generatePipeline", () => {
     const result = await generatePipeline(ADDR);
 
     expect(result.content).toBe("a different page");
-    expect(result.prompt).toBe("prompt for: a different page");
+    expect(result.inputs.prompt).toBe("prompt for: a different page");
     expect(generateMock).toHaveBeenCalledTimes(2);
   });
 
@@ -169,7 +169,7 @@ describe("generatePipeline", () => {
     // Falls back to the already-passed original (near-duplicates are allowed).
     expect(result.content).toBe("duplicated content");
     // The prompt matches the kept original, not the discarded dedup regen.
-    expect(result.prompt).toBe("prompt for: duplicated content");
+    expect(result.inputs.prompt).toBe("prompt for: duplicated content");
     expect(generateMock).toHaveBeenCalledTimes(2);
   });
 
@@ -189,70 +189,6 @@ describe("generatePipeline", () => {
 
     const result = await generatePipeline(ADDR);
 
-    expect(result.provenance.model).toBe("fallback-model:free");
-  });
-});
-
-describe("generatePipeline with a book context (books experiment)", () => {
-  const bookCtx: BookContext = {
-    volumeKey: "pipe/1/1/1",
-    book: {
-      volume_key: "pipe/1/1/1",
-      form: "a prayer",
-      title: null,
-      tags: null,
-      model: null,
-      prompt_variant: null,
-      created_at: new Date(),
-      titled_at: null,
-    },
-    prev: "The ship left harbor.\n…\nNo one watched it go.",
-    next: "By morning the coast was gone.\n…\nThe log ends here.",
-  };
-
-  it("pins the locked form, book variant, and neighbor seams as levers", async () => {
-    generateMock.mockResolvedValue(gen("a book page"));
-    const result = await generatePipeline(ADDR, bookCtx);
-
-    expect(result.provenance.prompt_variant).toBe("book-v1");
-    expect(result.provenance.seed_word).toBe("a prayer");
-    const levers = generateMock.mock.calls[0][0];
-    expect(levers.form).toBe("a prayer");
-    expect(levers.prev).toBe(bookCtx.prev);
-    expect(levers.next).toBe(bookCtx.next);
-  });
-
-  it("keeps the locked form and seams across moderation and dedup regens", async () => {
-    await seedExistingPage("other/1/1/1/1", "colliding content");
-    generateMock
-      .mockResolvedValueOnce(gen("flagged content")) // moderation reject
-      .mockResolvedValueOnce(gen("colliding content")) // passes, then collides
-      .mockResolvedValueOnce(gen("a fresh book page")); // dedup regen
-    moderateMock
-      .mockResolvedValueOnce({ ok: false, ms: 40 })
-      .mockResolvedValue({ ok: true, ms: 50 });
-
-    const result = await generatePipeline(ADDR, bookCtx);
-
-    expect(result.content).toBe("a fresh book page");
-    expect(result.provenance.prompt_variant).toBe("book-v1");
-    expect(result.provenance.seed_word).toBe("a prayer");
-    // Every attempt — initial, moderation regen, dedup regen — stayed in-book.
-    for (const [levers] of generateMock.mock.calls) {
-      expect(levers.form).toBe("a prayer");
-      expect(levers.promptVariant).toBe("book-v1");
-      expect(levers.prev).toBe(bookCtx.prev);
-      expect(levers.next).toBe(bookCtx.next);
-    }
-  });
-
-  it("without a book context, levers stay base-v2 with no seams", async () => {
-    generateMock.mockResolvedValue(gen("a plain page"));
-    const result = await generatePipeline(ADDR);
-
-    expect(result.provenance.prompt_variant).toBe("base-v2");
-    const levers = generateMock.mock.calls[0][0];
-    expect(levers.prev).toBeUndefined();
-    expect(levers.next).toBeUndefined();
+    expect(result.inputs.model).toBe("fallback-model:free");
   });
 });
