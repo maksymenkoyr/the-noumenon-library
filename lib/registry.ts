@@ -85,10 +85,15 @@ const MAX_LATENCY_FACTOR = 1.25;
  * way). Pure and exported so the weight distribution is unit-testable without
  * a DB. Every row is assumed already eligible (poolFor's job) — this only
  * decides which one wins.
+ *
+ * `rng` supplies the [0, 1) draws — Math.random by default, or an address-
+ * seeded stream (lib/seededRandom.ts) when the caller wants the pick to be a
+ * reproducible function of the page's coordinate.
  */
 export function weightedPick(
   rows: readonly RegistryRow[],
   stats: ReadonlyMap<string, ModelStat>,
+  rng: () => number = Math.random,
 ): RegistryRow {
   if (rows.length === 0) {
     throw new Error("weightedPick: empty pool");
@@ -105,9 +110,9 @@ export function weightedPick(
     // Every eligible row is weighted 0 — fall back to a uniform pick rather
     // than throw, so a config oddity degrades to "any model" instead of a
     // hard failure.
-    return rows[Math.floor(Math.random() * rows.length)];
+    return rows[Math.floor(rng() * rows.length)];
   }
-  let r = Math.random() * total;
+  let r = rng() * total;
   for (let i = 0; i < rows.length; i++) {
     r -= effectiveWeights[i];
     if (r <= 0) return rows[i];
@@ -124,6 +129,7 @@ export function weightedPick(
  */
 export async function chooseGenerationModel(
   stats: ReadonlyMap<string, ModelStat>,
+  rng: () => number = Math.random,
 ): Promise<RegistryRow> {
   const rows = await poolFor("generation");
   const eligible = rows.filter((row) => row.weight > 0);
@@ -133,7 +139,7 @@ export async function chooseGenerationModel(
       "chooseGenerationModel: no eligible generation models (check model_registry, provider keys, and health)",
     );
   }
-  return weightedPick(pool, stats);
+  return weightedPick(pool, stats, rng);
 }
 
 /** The moderation pool in chain order (lib/moderate.ts walks it in order). */

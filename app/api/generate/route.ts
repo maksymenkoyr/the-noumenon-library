@@ -8,8 +8,17 @@ export const maxDuration = 60; // Hobby cap; generations run 8–32s
 
 export async function GET() {
   const address = formatAddress(randomAddress());
-  const { status, text, model, generationMs, moderationMs, moderationModel, prompt } =
-    await resolvePage(address, { clientIp: await getClientIp() });
+  const {
+    status,
+    text,
+    model,
+    generationMs,
+    moderationMs,
+    moderationModel,
+    prompt,
+    promptVariant,
+    form,
+  } = await resolvePage(address, { clientIp: await getClientIp() });
   return NextResponse.json({
     address,
     status,
@@ -19,5 +28,8 @@ export async function GET() {
     moderationMs,
     moderationModel,
     prompt,
+    promptVariant,
+    // The sampled axis fingerprint (base-v5) or book form, from seed_word.
+    axes: form,
   });
 }

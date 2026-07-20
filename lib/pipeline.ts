@@ -1,8 +1,10 @@
 import type { BookContext } from "./book";
 import type { GenerationUsage } from "./economics";
 import {
+  axisFingerprint,
   chooseLevers,
   generatePage,
+  provenanceVariant,
   type GenerationLevers,
   type LeverOverrides,
 } from "./generate";
@@ -49,8 +51,12 @@ function provenanceFrom(levers: GenerationLevers): PageProvenance {
   return {
     model: levers.model,
     temperature: levers.temperature,
-    prompt_variant: levers.promptVariant,
-    seed_word: levers.form,
+    // Applied constraints ride as `+id` suffixes (e.g. `base-v5+no-library`).
+    prompt_variant: provenanceVariant(levers),
+    // seed_word carries the book's locked form in book mode, else the sampled
+    // axis fingerprint (base-v5) — the research signal for which register
+    // combinations produce pages worth pausing on.
+    seed_word: levers.form ?? axisFingerprint(levers.axes),
   };
 }
 
@@ -100,14 +106,16 @@ export async function generatePipeline(
   };
 
   // Track levers and the prompt that produced them alongside content, so
-  // provenance always matches what we commit.
-  let levers = await chooseLevers(overrides);
+  // provenance always matches what we commit. Levers are address-seeded
+  // (lib/generate.ts), and each regeneration below bumps the attempt index so
+  // a retry deterministically draws a different sample than the one it replaces.
+  let levers = await chooseLevers(address, overrides, 0);
   let { text: content, prompt } = await run(levers);
 
   let modResult = await check(content);
   if (!modResult.ok) {
     // Moderation fail → regenerate once with fresh levers (architecture §7).
-    levers = await chooseLevers(overrides);
+    levers = await chooseLevers(address, overrides, 1);
     ({ text: content, prompt } = await run(levers));
     modResult = await check(content);
     if (!modResult.ok) {
@@ -126,7 +134,7 @@ export async function generatePipeline(
   // replace the already-passed content; otherwise keep the original (near-
   // duplicates are allowed by design — no dark-shelving for a mere collision).
   if (await contentExistsElsewhere(hashContent(content), address)) {
-    const dedupLevers = await chooseLevers(overrides);
+    const dedupLevers = await chooseLevers(address, overrides, 2);
     const dedupRun = await run(dedupLevers);
     const dedupModResult = await check(dedupRun.text);
     if (dedupModResult.ok) {

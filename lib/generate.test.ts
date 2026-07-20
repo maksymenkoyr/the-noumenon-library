@@ -16,9 +16,15 @@ vi.mock("./providers", async () => {
 
 import { config } from "./config";
 import { closePool, query } from "./db";
-import { chooseLevers, generatePage, type GenerationLevers } from "./generate";
+import {
+  axisFingerprint,
+  chooseLevers,
+  generatePage,
+  provenanceVariant,
+  type GenerationLevers,
+} from "./generate";
 import { FREE_TIER_KEY } from "./modelStats";
-import { buildPrompt } from "./prompts";
+import { buildPrompt, GENERATION_AXES, GENERATION_CONSTRAINTS } from "./prompts";
 
 /** A minimal fake OpenAI chat completion. */
 function completion(content: string, totalTokens = 0) {
@@ -32,6 +38,8 @@ const levers: GenerationLevers = {
   maxTokens: 1000,
   promptVariant: "base-v2",
   form: "a field guide entry",
+  constraints: [],
+  axes: [],
 };
 
 beforeAll(async () => {
@@ -223,13 +231,13 @@ describe("chooseLevers", () => {
       "UPDATE model_registry SET enabled = false WHERE slug = 'model-b' AND task = 'generation'",
     );
     for (let i = 0; i < 20; i++) {
-      const result = await chooseLevers();
+      const result = await chooseLevers(`addr-${i}`);
       expect(result.model).toBe("model-a");
     }
   });
 
   it("applies book-mode overrides (locked form/variant/neighbors)", async () => {
-    const result = await chooseLevers({
+    const result = await chooseLevers("addr", {
       form: "a prayer",
       promptVariant: "book-v1",
       prev: "prev text",
@@ -239,13 +247,102 @@ describe("chooseLevers", () => {
     expect(result.promptVariant).toBe("book-v1");
     expect(result.prev).toBe("prev text");
     expect(result.next).toBe("next text");
+    // book-v1 carries neither the constraint slot nor the axes.
+    expect(result.constraints).toEqual([]);
+    expect(result.axes).toEqual([]);
   });
 
-  it("defaults to a random form and the base-v2 variant with no overrides", async () => {
-    const result = await chooseLevers();
-    expect(result.promptVariant).toBe("base-v2");
-    expect(result.form).toBeTruthy();
+  it("carries no form label and defaults to base-v6 with no overrides", async () => {
+    const result = await chooseLevers("addr");
+    expect(result.promptVariant).toBe("base-v6");
+    // The base path dropped the register label — form is book-mode-only now.
+    expect(result.form).toBeUndefined();
     expect(result.prev).toBeUndefined();
     expect(result.next).toBeUndefined();
+  });
+
+  it("is a reproducible function of the address (same seed → same levers)", async () => {
+    const a = await chooseLevers("gallery/1/2/3/4");
+    const b = await chooseLevers("gallery/1/2/3/4");
+    expect(b.model).toBe(a.model);
+    expect(b.temperature).toBe(a.temperature);
+    expect(b.constraints.map((c) => c.id)).toEqual(a.constraints.map((c) => c.id));
+    // Axes reproduce too — same names, same options, same order.
+    expect(b.axes).toEqual(a.axes);
+  });
+
+  it("draws a different sample on a regeneration attempt", async () => {
+    const first = await chooseLevers("gallery/1/2/3/4", {}, 0);
+    const retry = await chooseLevers("gallery/1/2/3/4", {}, 1);
+    // Temperature is continuous; a different seed effectively never collides.
+    expect(retry.temperature).not.toBe(first.temperature);
+  });
+
+  it("samples constraints from the seed — deterministic, and address-dependent", async () => {
+    // Across many addresses the constraint both fires and doesn't, proving it
+    // is sampled (not always-on/off) and driven by the seed.
+    const fired = new Set<boolean>();
+    for (let i = 0; i < 50; i++) {
+      const levers = await chooseLevers(`addr-${i}`);
+      fired.add(levers.constraints.some((c) => c.id === "no-library"));
+    }
+    expect(fired).toEqual(new Set([true, false]));
+
+    // Whatever fired is reflected in the provenance variant suffix.
+    const one = await chooseLevers("addr-0");
+    const expected =
+      "base-v6" + one.constraints.map((c) => `+${c.id}`).join("");
+    expect(provenanceVariant(one)).toBe(expected);
+    expect(GENERATION_CONSTRAINTS.length).toBeGreaterThan(0);
+  });
+
+  it("does not sample axes on the default variant (axes paused for now)", async () => {
+    // base-v6 is the default but is intentionally left out of AXIS_VARIANTS
+    // (lib/prompts.ts), so ordinary pages carry no axis steering — the axes
+    // are turned off while keeping the machinery in place.
+    for (let i = 0; i < 30; i++) {
+      const levers = await chooseLevers(`page-${i}`);
+      expect(levers.promptVariant).toBe("base-v6");
+      expect(levers.axes).toEqual([]);
+    }
+  });
+
+  it("samples low-level axes from the seed — varied, valid, capped, and fingerprinted", async () => {
+    // Exercised against base-v5 (still axis-bearing); base-v6's axes are
+    // currently paused, so the sampling machinery is covered via the frozen
+    // variant that still wires them.
+    const dictions = new Set<string>();
+    let sawMultiAxis = false;
+    let sawBare = false;
+    for (let i = 0; i < 60; i++) {
+      const levers = await chooseLevers(`page-${i}`, { promptVariant: "base-v5" });
+      // Never more than the co-fire cap (lib/generate.ts MAX_AXES).
+      expect(levers.axes.length).toBeLessThanOrEqual(3);
+      for (const axis of levers.axes) {
+        // Each choice is a real option of a real axis, rendered to a fact.
+        const def = GENERATION_AXES.find((a) => a.name === axis.name);
+        expect(def).toBeDefined();
+        expect(def!.options).toContain(axis.option);
+        expect(axis.fact).toBe(def!.render(axis.option));
+        // base-v6 dropped the top-down named-genre register axis entirely.
+        expect(axis.name).not.toBe("register");
+        if (axis.name === "diction") dictions.add(axis.option);
+      }
+      if (levers.axes.length >= 2) sawMultiAxis = true;
+      if (levers.axes.length === 0) sawBare = true;
+    }
+    // The seed spreads pages across a low-level axis's options, sometimes
+    // stacks axes, and sometimes leaves the page bare — the intended range.
+    expect(dictions.size).toBeGreaterThan(2);
+    expect(sawMultiAxis).toBe(true);
+    expect(sawBare).toBe(true);
+
+    // Fingerprint: undefined when empty, `name=option` pairs otherwise.
+    expect(axisFingerprint([])).toBeUndefined();
+    expect(
+      axisFingerprint([
+        { name: "tense", option: "the past tense", fact: "Its verbs stay in the past tense." },
+      ]),
+    ).toBe("tense=the past tense");
   });
 });

@@ -93,9 +93,13 @@ describe("generatePipeline", () => {
     expect(result.content).toBe("a unique page");
     expect(result.provenance.model).toBeTruthy();
     expect(result.provenance.temperature).toBeGreaterThan(0);
-    expect(result.provenance.prompt_variant).toBe("base-v2");
-    // The form/register lever is logged (in the seed_word column).
-    expect(result.provenance.seed_word).toBeTruthy();
+    // base-v6, plus a `+id` suffix per constraint that happened to fire.
+    expect(result.provenance.prompt_variant).toMatch(/^base-v6(\+[a-z-]+)*$/);
+    // seed_word carries the axis fingerprint when axes are enabled — but they
+    // are currently paused for base-v6 (lib/prompts.ts AXIS_VARIANTS), so it is
+    // absent here. Stays tolerant of `name=option` pairs for when they return.
+    const seedWord = result.provenance.seed_word;
+    expect(seedWord === undefined || /=/.test(seedWord)).toBe(true);
     // The exact prompt that produced the committed content (dev-overlay
     // provenance, lib/resolvePage.ts / lib/devMode).
     expect(result.prompt).toBe("prompt for: a unique page");
@@ -246,11 +250,11 @@ describe("generatePipeline with a book context (books experiment)", () => {
     }
   });
 
-  it("without a book context, levers stay base-v2 with no seams", async () => {
+  it("without a book context, levers stay base-v6 with no seams", async () => {
     generateMock.mockResolvedValue(gen("a plain page"));
     const result = await generatePipeline(ADDR);
 
-    expect(result.provenance.prompt_variant).toBe("base-v2");
+    expect(result.provenance.prompt_variant).toMatch(/^base-v6(\+[a-z-]+)*$/);
     const levers = generateMock.mock.calls[0][0];
     expect(levers.prev).toBeUndefined();
     expect(levers.next).toBeUndefined();
