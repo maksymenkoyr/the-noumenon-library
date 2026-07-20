@@ -142,8 +142,13 @@ export const config = {
   // Economics & safety controls (docs/reference/architecture.md §10, Phase 6). Enforced at
   // admission control in lib/economics.ts, backed by Postgres counters.
   // Per-visitor generation rate limit (only generations count; cache hits don't).
-  rateLimitPerMinute: numeric("RATE_LIMIT_PER_MINUTE", 10),
+  rateLimitPerMinute: numeric("RATE_LIMIT_PER_MINUTE", 5),
   rateLimitWindowSeconds: numeric("RATE_LIMIT_WINDOW_SECONDS", 60),
+  // Second, longer-horizon tier on the same counter (rate_limit_hits): catches
+  // a visitor pacing just under the per-minute ceiling but still hammering the
+  // library over an hour. Checked in addition to, not instead of, the above.
+  rateLimitPerHour: numeric("RATE_LIMIT_PER_HOUR", 50),
+  rateLimitHourWindowSeconds: numeric("RATE_LIMIT_HOUR_WINDOW_SECONDS", 3600),
   // Monthly spend cap (USD); over the cap flips the library to explore-only.
   monthlySpendCapUsd: numeric("MONTHLY_SPEND_CAP_USD", 10),
   // Reader-signal write throttle (docs/reference/architecture.md §8, Phase 10). Likes and
