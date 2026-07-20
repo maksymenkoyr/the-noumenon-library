@@ -91,21 +91,23 @@ describe("generatePipeline", () => {
     const result = await generatePipeline(ADDR);
 
     expect(result.content).toBe("a unique page");
-    expect(result.provenance.model).toBeTruthy();
-    expect(result.provenance.temperature).toBeGreaterThan(0);
+    expect(result.inputs.model).toBeTruthy();
+    expect(result.inputs.provider).toBe("openrouter");
+    expect(result.inputs.temperature).toBeGreaterThan(0);
     // base-v6, plus a `+id` suffix per constraint that happened to fire.
-    expect(result.provenance.prompt_variant).toMatch(/^base-v6(\+[a-z-]+)*$/);
-    // seed_word carries the axis fingerprint when axes are enabled — but they
+    expect(result.inputs.promptVariant).toMatch(/^base-v6(\+[a-z-]+)*$/);
+    expect(result.inputs.constraints).toBeInstanceOf(Array);
+    // form carries the axis fingerprint when axes are enabled — but they
     // are currently paused for base-v6 (lib/prompts.ts AXIS_VARIANTS), so it is
     // absent here. Stays tolerant of `name=option` pairs for when they return.
-    const seedWord = result.provenance.seed_word;
-    expect(seedWord === undefined || /=/.test(seedWord)).toBe(true);
+    const form = result.inputs.form;
+    expect(form === undefined || /=/.test(form)).toBe(true);
     // The exact prompt that produced the committed content (dev-overlay
     // provenance, lib/resolvePage.ts / lib/devMode).
-    expect(result.prompt).toBe("prompt for: a unique page");
+    expect(result.inputs.prompt).toBe("prompt for: a unique page");
     // Generation and moderation time are reported separately, not as one total.
-    expect(result.generationMs).toBe(500);
-    expect(result.moderationMs).toBe(50);
+    expect(result.inputs.generationMs).toBe(500);
+    expect(result.inputs.moderationMs).toBe(50);
     expect(generateMock).toHaveBeenCalledTimes(1);
   });
 
@@ -124,10 +126,10 @@ describe("generatePipeline", () => {
     // Usage is summed across every generation call (both attempts here).
     expect(result.usage.tokens).toBe(200);
     // The prompt tracks the committed (regenerated) attempt, not the rejected one.
-    expect(result.prompt).toBe("prompt for: clean content");
+    expect(result.inputs.prompt).toBe("prompt for: clean content");
     // Both timings sum across every attempt, including the moderation reject.
-    expect(result.generationMs).toBe(1000);
-    expect(result.moderationMs).toBe(100);
+    expect(result.inputs.generationMs).toBe(1000);
+    expect(result.inputs.moderationMs).toBe(100);
     // A single reject that recovers on regen is normal — no monitor event.
     expect(monitorMock).not.toHaveBeenCalled();
   });
@@ -155,7 +157,7 @@ describe("generatePipeline", () => {
     const result = await generatePipeline(ADDR);
 
     expect(result.content).toBe("a different page");
-    expect(result.prompt).toBe("prompt for: a different page");
+    expect(result.inputs.prompt).toBe("prompt for: a different page");
     expect(generateMock).toHaveBeenCalledTimes(2);
   });
 
@@ -173,7 +175,7 @@ describe("generatePipeline", () => {
     // Falls back to the already-passed original (near-duplicates are allowed).
     expect(result.content).toBe("duplicated content");
     // The prompt matches the kept original, not the discarded dedup regen.
-    expect(result.prompt).toBe("prompt for: duplicated content");
+    expect(result.inputs.prompt).toBe("prompt for: duplicated content");
     expect(generateMock).toHaveBeenCalledTimes(2);
   });
 
@@ -193,7 +195,7 @@ describe("generatePipeline", () => {
 
     const result = await generatePipeline(ADDR);
 
-    expect(result.provenance.model).toBe("fallback-model:free");
+    expect(result.inputs.model).toBe("fallback-model:free");
   });
 });
 
@@ -218,8 +220,8 @@ describe("generatePipeline with a book context (books experiment)", () => {
     generateMock.mockResolvedValue(gen("a book page"));
     const result = await generatePipeline(ADDR, bookCtx);
 
-    expect(result.provenance.prompt_variant).toBe("book-v1");
-    expect(result.provenance.seed_word).toBe("a prayer");
+    expect(result.inputs.promptVariant).toBe("book-v1");
+    expect(result.inputs.form).toBe("a prayer");
     const levers = generateMock.mock.calls[0][0];
     expect(levers.form).toBe("a prayer");
     expect(levers.prev).toBe(bookCtx.prev);
@@ -239,8 +241,8 @@ describe("generatePipeline with a book context (books experiment)", () => {
     const result = await generatePipeline(ADDR, bookCtx);
 
     expect(result.content).toBe("a fresh book page");
-    expect(result.provenance.prompt_variant).toBe("book-v1");
-    expect(result.provenance.seed_word).toBe("a prayer");
+    expect(result.inputs.promptVariant).toBe("book-v1");
+    expect(result.inputs.form).toBe("a prayer");
     // Every attempt — initial, moderation regen, dedup regen — stayed in-book.
     for (const [levers] of generateMock.mock.calls) {
       expect(levers.form).toBe("a prayer");
@@ -254,7 +256,7 @@ describe("generatePipeline with a book context (books experiment)", () => {
     generateMock.mockResolvedValue(gen("a plain page"));
     const result = await generatePipeline(ADDR);
 
-    expect(result.provenance.prompt_variant).toMatch(/^base-v6(\+[a-z-]+)*$/);
+    expect(result.inputs.promptVariant).toMatch(/^base-v6(\+[a-z-]+)*$/);
     const levers = generateMock.mock.calls[0][0];
     expect(levers.prev).toBeUndefined();
     expect(levers.next).toBeUndefined();

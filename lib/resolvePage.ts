@@ -20,6 +20,7 @@ import {
   reservePage,
   setCondensed,
   waitForPage,
+  type PageInputs,
   type PageRow,
 } from "./store";
 
@@ -35,25 +36,54 @@ export interface ResolvedPage {
   status: ResolvedStatus;
   text: string;
   // Dev-overlay provenance (lib/devMode, app/[[...address]]/dev-badge), ignored
-  // by non-dev callers. `model` is present whenever known — a fresh generation
-  // and a committed revisit alike; the timings are measured live during a
-  // fresh generation only (kept as separate generation/moderation totals
-  // rather than one combined number), so revisits leave them undefined.
+  // by non-dev callers. Sourced from the stored PageInputs record (lib/store.ts)
+  // on both a fresh generation and a committed revisit alike; only undefined
+  // for rows committed before pages.inputs existed, which degrade to a
+  // model-only badge (see `devFields` below).
   model?: string;
   generationMs?: number;
   moderationMs?: number;
-  // The chain link that passed the committed content (lib/moderate.ts) — same
-  // fresh-generation-only, non-persisted rule as the timings above.
+  // The chain link that passed the committed content (lib/moderate.ts).
   moderationModel?: string;
   // The exact prompt sent for this generation, plus the levers that produced
-  // it — fresh-generation only. The prompt is never persisted, and for
-  // book-v1 it depends on the neighbors/seam-case at generation time, so a
-  // revisit has no way to reconstruct the original exactly; the overlay
-  // simply omits it rather than showing something approximate.
+  // it. For book-v1 this reflects the neighbors/seam-case at generation time,
+  // not at revisit time.
   prompt?: string;
   promptVariant?: string;
   form?: string;
   temperature?: number;
+}
+
+/**
+ * Dev-overlay fields from a stored/just-built inputs record. Falls back to
+ * the scalar model column for rows committed before pages.inputs existed
+ * (NULL inputs → model-only badge).
+ */
+export function devFields(
+  inputs: PageInputs | null | undefined,
+  fallbackModel?: string | null,
+): Pick<
+  ResolvedPage,
+  | "model"
+  | "generationMs"
+  | "moderationMs"
+  | "moderationModel"
+  | "prompt"
+  | "promptVariant"
+  | "form"
+  | "temperature"
+> {
+  if (!inputs) return { model: fallbackModel ?? undefined };
+  return {
+    model: inputs.model ?? fallbackModel ?? undefined,
+    generationMs: inputs.generationMs,
+    moderationMs: inputs.moderationMs,
+    moderationModel: inputs.moderationModel,
+    prompt: inputs.prompt,
+    promptVariant: inputs.promptVariant,
+    form: inputs.form,
+    temperature: inputs.temperature,
+  };
 }
 
 const TAKEN_DOWN_PLACEHOLDER =
@@ -135,9 +165,8 @@ async function generateAndCommit(
       const addr = normalizeAddress(address.split("/"));
       if (addr) bookCtx = await resolveBookContext(addr, auxUsage);
     }
-    const { content, provenance, usage, prompt, generationMs, moderationMs, moderationModel } =
-      await generatePipeline(address, bookCtx);
-    if (!(await commitPage(address, content, provenance))) {
+    const { content, inputs, usage } = await generatePipeline(address, bookCtx);
+    if (!(await commitPage(address, content, inputs))) {
       // The reservation is gone or no longer 'generating' — a takedown landed
       // mid-generation (which must win, docs/reference/legal.md), or the row was
       // released/reclaimed by another request. The LLM spend still happened,
@@ -174,18 +203,7 @@ async function generateAndCommit(
       tokens: usage.tokens + auxUsage.tokens,
       costUsd: usage.costUsd + auxUsage.costUsd,
     });
-    return {
-      status: "ok",
-      text: content,
-      model: provenance.model,
-      generationMs,
-      moderationMs,
-      moderationModel,
-      prompt,
-      promptVariant: provenance.prompt_variant,
-      form: provenance.seed_word,
-      temperature: provenance.temperature,
-    };
+    return { status: "ok", text: content, ...devFields(inputs) };
   } catch (error) {
     // Unwedge the address so the next visitor becomes the first visitor. Covers
     // provider errors, an undetermined moderation result (lib/moderate throws),
@@ -202,10 +220,11 @@ async function generateAndCommit(
 }
 
 function resolved(row: PageRow): ResolvedPage {
-  // Revisit: the model is on the stored row; duration was never persisted
-  // (live-only), so the overlay shows model without a time.
+  // Revisit: the stored inputs record (if present) surfaces the same
+  // prompt/levers/timings a fresh generation would; old rows with no
+  // stored inputs degrade to a model-only badge (devFields).
   if (row.status === "ok")
-    return { status: "ok", text: row.content ?? "", model: row.model ?? undefined };
+    return { status: "ok", text: row.content ?? "", ...devFields(row.inputs, row.model) };
   // taken_down is the only remaining non-ok terminal state.
   return { status: "taken_down", text: TAKEN_DOWN_PLACEHOLDER };
 }

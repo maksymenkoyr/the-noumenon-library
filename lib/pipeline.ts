@@ -11,7 +11,7 @@ import {
 import { moderate, type ModerationResult } from "./moderate";
 import { monitor } from "./monitor";
 import { BOOK_PROMPT_VARIANT } from "./prompts";
-import { contentExistsElsewhere, hashContent, type PageProvenance } from "./store";
+import { contentExistsElsewhere, hashContent, type PageInputs } from "./store";
 
 /**
  * The generation pipeline — architecture §2 steps 5–8 for one novel page:
@@ -26,37 +26,40 @@ import { contentExistsElsewhere, hashContent, type PageProvenance } from "./stor
  */
 export interface PipelineResult {
   content: string;
-  provenance: PageProvenance;
+  // Everything that produced `content` — prompt, levers, moderation model,
+  // timings — as one record (lib/store.ts PageInputs), persisted whole by
+  // commitPage and surfaced by the dev overlay on both fresh generation and
+  // revisit. Tracks whichever attempt (initial / moderation regen / dedup
+  // regen) ended up committed.
+  inputs: PageInputs;
   // Every LLM generation call in this pipeline, summed — the spend the page
   // actually cost, including regeneration/dedup retries (§10). Moderation tokens
   // are not counted (free models; the dominant cost is generation).
   usage: GenerationUsage;
-  // The exact prompt that produced `content` — dev-overlay provenance
-  // (lib/devMode), not persisted. Tracks whichever attempt (initial /
-  // moderation regen / dedup regen) ended up committed, same as `levers`.
-  prompt: string;
-  // Wall time spent in generation vs moderation, reported separately rather
-  // than folded into one total — each summed across every attempt in this
-  // run (including moderation/dedup regenerations), since a retry really did
-  // spend that time.
-  generationMs: number;
-  moderationMs: number;
-  // The chain link that passed whichever attempt ended up committed — dev-
-  // overlay provenance, same tracking rule as `prompt`/`levers` above.
-  // Undefined only if moderation was disabled outright (lib/moderate.ts).
-  moderationModel?: string;
 }
 
-function provenanceFrom(levers: GenerationLevers): PageProvenance {
+function inputsFrom(
+  levers: GenerationLevers,
+  prompt: string,
+  generationMs: number,
+  moderationMs: number,
+  moderationModel?: string,
+): PageInputs {
   return {
     model: levers.model,
+    provider: levers.provider,
     temperature: levers.temperature,
     // Applied constraints ride as `+id` suffixes (e.g. `base-v5+no-library`).
-    prompt_variant: provenanceVariant(levers),
-    // seed_word carries the book's locked form in book mode, else the sampled
+    promptVariant: provenanceVariant(levers),
+    constraints: levers.constraints.map((c) => c.id),
+    // form carries the book's locked form in book mode, else the sampled
     // axis fingerprint (base-v5) — the research signal for which register
     // combinations produce pages worth pausing on.
-    seed_word: levers.form ?? axisFingerprint(levers.axes),
+    form: levers.form ?? axisFingerprint(levers.axes),
+    prompt,
+    moderationModel,
+    generationMs,
+    moderationMs,
   };
 }
 
@@ -147,11 +150,7 @@ export async function generatePipeline(
 
   return {
     content,
-    provenance: provenanceFrom(levers),
+    inputs: inputsFrom(levers, prompt, generationMs, moderationMs, moderationModel),
     usage,
-    prompt,
-    generationMs,
-    moderationMs,
-    moderationModel,
   };
 }
