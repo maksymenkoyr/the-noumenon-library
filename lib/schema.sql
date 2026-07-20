@@ -142,6 +142,37 @@ CREATE TABLE IF NOT EXISTS engagement (
 CREATE INDEX IF NOT EXISTS engagement_address_time_idx
   ON engagement (address, created_at);
 
+-- Raw reader-timeline events (§8) — the source of truth behind `engagement`.
+-- One row per client-emitted event (arrive/visible/hidden/idle/active/leave),
+-- keyed by an EPHEMERAL per-page-load id (crypto.randomUUID(), minted in
+-- memory on mount, never persisted client-side, cannot correlate across pages
+-- or visits — not a cookie, not a session token). `t_ms` is relative to
+-- performance.now() at page load, not wall-clock. `device` is a coarse class
+-- ('mobile'|'tablet'|'desktop') derived server-side from the User-Agent header
+-- (lib/device.ts) — the raw UA string is never stored. No user identifiers
+-- (docs/reference/legal.md).
+CREATE TABLE IF NOT EXISTS page_events (
+  load_id     UUID NOT NULL,
+  seq         SMALLINT NOT NULL,
+  address     TEXT NOT NULL REFERENCES pages(address),
+  event       TEXT NOT NULL
+              CHECK (event IN ('arrive','visible','hidden','idle','active','leave')),
+  t_ms        INTEGER NOT NULL,
+  device      TEXT,
+  arrived_via TEXT,                    -- only meaningful on the 'arrive' row
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (load_id, seq)           -- dedupe: a re-sent tail beacon is a no-op
+);
+CREATE INDEX IF NOT EXISTS page_events_address_time_idx
+  ON page_events (address, created_at);
+
+-- `engagement` becomes a per-load summary row (idle-corrected dwell,
+-- recomputed from page_events), not one row per beacon flush — the unique
+-- index makes repeated flushes for the same load an upsert, not new rows.
+ALTER TABLE engagement ADD COLUMN IF NOT EXISTS load_id UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS engagement_load_id_key
+  ON engagement (load_id) WHERE load_id IS NOT NULL;
+
 -- Silent negative signal — the "not for me" mark. Same aggregate-counter idiom
 -- as page_likes (per-reader state in localStorage, no identifiers), but the
 -- count is NEVER shown to readers: it exists only for the operator's insight
