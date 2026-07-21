@@ -7,7 +7,7 @@ import { sendReportEmail } from "@/lib/reportEmail";
 import { recordReport } from "@/lib/reports";
 
 /**
- * File a content report against a committed leaf. The row lands in the
+ * File a content report against a committed page. The row lands in the
  * operator's queue (page_reports, reviewed on /operator) regardless of what
  * happens to the notification side-channels — email via after() so it runs
  * once the response has flushed (a bare floating promise can be killed when a

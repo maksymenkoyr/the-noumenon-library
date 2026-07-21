@@ -1,34 +1,36 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { PRESS_EVENT, pressedKey } from "@/lib/pressed";
+import { LIKE_EVENT, likedKey, migrateLegacyLikes } from "@/lib/liked";
+
+migrateLegacyLikes();
 
 /**
- * Reader marks for a crystallized leaf (docs/reference/architecture.md §8, Phase 10):
+ * Reader marks for a crystallized page (docs/reference/architecture.md §8, Phase 10):
  *
- *  - A "press" gesture — a page is a leaf; you press it the way you'd press a
- *    flower to keep it. Per-reader state lives in localStorage (no accounts); the
- *    aggregate count is a small server counter, shown here on the leaf. The heart
- *    is deliberately muted ink, not social-app red, to sit in the quiet palette.
+ *  - A "like" gesture — a small keepsake, not a social vote. Per-reader state
+ *    lives in localStorage (no accounts); the aggregate count is a small server
+ *    counter, shown here on the page. The heart is deliberately muted ink, not
+ *    social-app red, to sit in the quiet palette.
  *  - A reader timeline — emits named, timestamped events (arrive, visible,
- *    hidden, idle, active, leave) as the reader interacts with the leaf, and
+ *    hidden, idle, active, leave) as the reader interacts with the page, and
  *    beacons them as a raw event log rather than one computed total. Idle
  *    detection and dwell math happen server-side (lib/engagement.ts) so that
  *    policy (e.g. the idle threshold) isn't baked into this client forever.
  *    Fire-and-forget.
  *
  * The app's second client component (after nav.tsx). Rendered only under a
- * committed (`ok`) leaf, so its address always has a row in `pages`.
+ * committed (`ok`) page, so its address always has a row in `pages`.
  */
 
 const dislikedKey = (address: string) => `noumenon:disliked:${address}`;
 
 // The nav breadcrumb for `arrived_via`, claimed (read-and-cleared) once per
-// page load at module scope: leaf navigation is a full page load, so this runs
-// exactly once per leaf, and an effect-scoped claim would be lost to
+// page load at module scope: page navigation is a full page load, so this runs
+// exactly once per page, and an effect-scoped claim would be lost to
 // StrictMode's dev double-mount. On the server (SSR import) sessionStorage
-// throws → null. The claim then belongs to the FIRST leaf address mounted in
-// this page load — a later leaf reached client-side (e.g. via /liked and back)
+// throws → null. The claim then belongs to the FIRST page address mounted in
+// this page load — a later page reached client-side (e.g. via /liked and back)
 // must not inherit it.
 const claimedVia: string | null = (() => {
   try {
@@ -43,8 +45,8 @@ let claimedForAddress: string | null = null;
 
 function readMark(key: string): boolean {
   try {
-    // Any non-null value is a mark — old press marks stored "1", newer ones a
-    // timestamp (lib/pressed.ts).
+    // Any non-null value is a mark — old like marks stored "1", newer ones a
+    // timestamp (lib/liked.ts).
     return localStorage.getItem(key) !== null;
   } catch {
     return false; // localStorage disabled (private mode) — just never persists
@@ -53,17 +55,17 @@ function readMark(key: string): boolean {
 
 function writeMark(key: string, on: boolean): void {
   try {
-    // The value is the mark time, so /liked can order presses by recency.
+    // The value is the mark time, so /liked can order likes by recency.
     if (on) localStorage.setItem(key, String(Date.now()));
     else localStorage.removeItem(key);
   } catch {
     /* non-fatal */
   }
-  window.dispatchEvent(new Event(PRESS_EVENT));
+  window.dispatchEvent(new Event(LIKE_EVENT));
 }
 
 /**
- * The browser's own mark (press or "not for me"), read through
+ * The browser's own mark (like or "not for me"), read through
  * useSyncExternalStore so the server snapshot is a stable `false` (no hydration
  * mismatch) and the read isn't a setState-in-effect. Re-renders on our own
  * writes and on cross-tab `storage`.
@@ -71,10 +73,10 @@ function writeMark(key: string, on: boolean): void {
 function useLocalMark(key: string): boolean {
   return useSyncExternalStore(
     (onChange) => {
-      window.addEventListener(PRESS_EVENT, onChange);
+      window.addEventListener(LIKE_EVENT, onChange);
       window.addEventListener("storage", onChange);
       return () => {
-        window.removeEventListener(PRESS_EVENT, onChange);
+        window.removeEventListener(LIKE_EVENT, onChange);
         window.removeEventListener("storage", onChange);
       };
     },
@@ -94,13 +96,13 @@ export function Marks({
   address: string;
   initialCount: number;
 }) {
-  const pressed = useLocalMark(pressedKey(address));
+  const liked = useLocalMark(likedKey(address));
   const disliked = useLocalMark(dislikedKey(address));
   const [count, setCount] = useState(initialCount);
 
   const toggle = useCallback(() => {
-    const next = !pressed;
-    writeMark(pressedKey(address), next); // flips `pressed` via the external store
+    const next = !liked;
+    writeMark(likedKey(address), next); // flips `liked` via the external store
     setCount((c) => Math.max(c + (next ? 1 : -1), 0)); // optimistic
     fetch("/api/like", {
       method: "POST",
@@ -115,7 +117,7 @@ export function Marks({
       .catch(() => {
         /* leave the optimistic count; the local mark still persists */
       });
-  }, [pressed, address]);
+  }, [liked, address]);
 
   // The silent "not for me" mark: local toggle + fire-and-forget aggregate
   // write. Deliberately no count anywhere — a research signal, not a score.
@@ -149,8 +151,8 @@ export function Marks({
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let lastActivityAt = 0;
 
-    // Bind the page-load breadcrumb to the first leaf mounted; comparing by
-    // address keeps it through StrictMode's dev remount of the same leaf.
+    // Bind the page-load breadcrumb to the first page mounted; comparing by
+    // address keeps it through StrictMode's dev remount of the same page.
     if (claimedForAddress === null) claimedForAddress = address;
     const arrivedVia = claimedForAddress === address ? claimedVia : null;
 
@@ -250,28 +252,28 @@ export function Marks({
     };
   }, [address]);
 
-  const label = pressed
-    ? `pressed · ${readers(count)}`
+  const label = liked
+    ? `liked · ${readers(count)}`
     : count > 0
       ? readers(count)
-      : "press this leaf";
+      : "like this page";
 
   return (
     <div className="flex items-baseline gap-6 font-mono text-sm text-neutral-500">
       <button
         type="button"
         onClick={toggle}
-        aria-pressed={pressed}
-        aria-label={pressed ? "un-press this leaf" : "press this leaf"}
+        aria-pressed={liked}
+        aria-label={liked ? "unlike this page" : "like this page"}
         className="inline-flex items-center gap-2 hover:text-neutral-800 dark:hover:text-neutral-200"
       >
         <span
           aria-hidden
           className={
-            pressed ? "text-neutral-800 dark:text-neutral-200" : undefined
+            liked ? "text-neutral-800 dark:text-neutral-200" : undefined
           }
         >
-          {pressed ? "♥" : "♡"}
+          {liked ? "♥" : "♡"}
         </span>
         <span>{label}</span>
       </button>

@@ -119,10 +119,10 @@ CREATE TABLE IF NOT EXISTS invite_redemptions (
 -- Reader signals (docs/architecture.md §8 "engagement", Phase 10). Two idioms,
 -- both mirroring existing counter tables above:
 
--- Aggregate "like"/press count per page — one row per address, upserted +/-1 as
--- readers press or un-press a leaf (monthly_spend style). Per-reader state lives
+-- Aggregate like count per page — one row per address, upserted +/-1 as
+-- readers like or unlike a page (monthly_spend style). Per-reader state lives
 -- in the browser (localStorage), so no user identifiers are stored here; this is
--- the public aggregate shown on the leaf and a success-bar research signal.
+-- the public aggregate shown on the page and a success-bar research signal.
 CREATE TABLE IF NOT EXISTS page_likes (
   address TEXT PRIMARY KEY REFERENCES pages(address),
   count   BIGINT NOT NULL DEFAULT 0    -- clamped >= 0 by the writer (lib/engagement.ts)

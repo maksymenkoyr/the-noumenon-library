@@ -1,8 +1,8 @@
 /**
- * Leaf rendering — the page as a fixed-size container holding a variable amount
- * of text (docs/reference/experience.md "The page as a fixed leaf", architecture §6).
+ * Page rendering — the page as a fixed-size container holding a variable amount
+ * of text (docs/reference/experience.md "The fixed-size page", architecture §6).
  *
- * Every state below shares the same `LEAF_HEIGHT` so the layout never shifts as
+ * Every state below shares the same `PAGE_HEIGHT` so the layout never shifts as
  * the Suspense fallback swaps for the finished page (the streaming guide's CLS
  * note). Text is top-aligned with honest whitespace beneath: a short page reads
  * as a deliberate ending, not as something broken. The quality bar is
@@ -10,14 +10,14 @@
  */
 
 // Calibrated to comfortably hold ~PAGE_MAX_WORDS (400) at the reading font;
-// a full page fills the leaf, a fragment leaves honest white below.
-const LEAF_HEIGHT = "min-h-[44rem]";
+// a full page fills the container, a fragment leaves honest white below.
+const PAGE_HEIGHT = "min-h-[44rem]";
 
-/** A crystallized page: its text, top-aligned in the leaf. */
-export function Leaf({ children }: { children: React.ReactNode }) {
+/** A crystallized page: its text, top-aligned in the container. */
+export function PageContent({ children }: { children: React.ReactNode }) {
   return (
     <article
-      className={`${LEAF_HEIGHT} whitespace-pre-wrap font-serif text-lg leading-loose text-neutral-800 dark:text-neutral-200`}
+      className={`${PAGE_HEIGHT} whitespace-pre-wrap font-serif text-lg leading-loose text-neutral-800 dark:text-neutral-200`}
     >
       {children}
     </article>
@@ -26,11 +26,11 @@ export function Leaf({ children }: { children: React.ReactNode }) {
 
 /**
  * The Suspense fallback for a first visit: the page is crystallizing into being.
- * Same dimensions as a real leaf so nothing jumps when the page arrives.
+ * Same dimensions as a real page so nothing jumps when the page arrives.
  */
-export function CrystallizingLeaf() {
+export function CrystallizingPage() {
   return (
-    <div className={`flex ${LEAF_HEIGHT} items-center justify-center`}>
+    <div className={`flex ${PAGE_HEIGHT} items-center justify-center`}>
       <p className="animate-pulse font-serif text-lg italic text-neutral-400">
         crystallizing…
       </p>
@@ -39,15 +39,15 @@ export function CrystallizingLeaf() {
 }
 
 const PLACEHOLDER_COPY = {
-  taken_down: "This leaf has been removed from the library.",
+  taken_down: "This page has been removed from the library.",
   explore:
     "This corner of the library is still dark — wander elsewhere and return later.",
   rate_limited:
-    "You're wandering faster than the library can crystallize new leaves. Pause a moment, then return.",
+    "You're wandering faster than the library can crystallize new pages. Pause a moment, then return.",
 } as const;
 
 /**
- * A leaf with no readable content: taken down, explore-only, or rate-limited.
+ * A page with no readable content: taken down, explore-only, or rate-limited.
  * `explore` covers a generation/moderation failure or admission control
  * refusing generation past the global spend cap (§10) — not this visitor's
  * fault, so it offers the way onward. `rate_limited` is specifically this
@@ -55,14 +55,14 @@ const PLACEHOLDER_COPY = {
  * onward link — following it would just re-trigger the same limit — the ask
  * is to slow down, not to keep clicking.
  */
-export function PlaceholderLeaf({
+export function PlaceholderPage({
   variant,
 }: {
   variant: keyof typeof PLACEHOLDER_COPY;
 }) {
   return (
     <div
-      className={`flex ${LEAF_HEIGHT} flex-col items-center justify-center gap-4 text-center`}
+      className={`flex ${PAGE_HEIGHT} flex-col items-center justify-center gap-4 text-center`}
     >
       <p className="font-serif text-lg italic text-neutral-400">
         {PLACEHOLDER_COPY[variant]}

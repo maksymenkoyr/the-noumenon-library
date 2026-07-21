@@ -83,13 +83,13 @@ export function devFields(
 }
 
 const TAKEN_DOWN_PLACEHOLDER =
-  "This leaf has been removed from the library.";
+  "This page has been removed from the library.";
 
 const EXPLORE_ONLY_PLACEHOLDER =
   "This corner of the library is still dark — wander elsewhere and return later.";
 
 const RATE_LIMITED_PLACEHOLDER =
-  "You're wandering faster than the library can crystallize new leaves. Pause a moment, then return.";
+  "You're wandering faster than the library can crystallize new pages. Pause a moment, then return.";
 
 /**
  * Resolve the page at a canonical address — the heart of the system

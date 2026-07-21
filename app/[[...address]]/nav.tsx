@@ -18,7 +18,7 @@ import { formatAddress, normalizeAddress } from "@/lib/address";
  */
 /**
  * Breadcrumb for the dwell beacon's `arrived_via` signal: written just before a
- * navigation, read-and-cleared by marks.tsx on the next leaf. sessionStorage is
+ * navigation, read-and-cleared by marks.tsx on the next page. sessionStorage is
  * per-tab, so a fresh tab (direct URL, shared link) correctly reports nothing.
  */
 const ARRIVED_KEY = "noumenon:arrived-via";
@@ -64,7 +64,7 @@ export function Nav({ nextHref }: { nextHref: string }) {
       >
         next →
       </a>
-      {/* A Link, not a full-load anchor: /liked is a listing, not a leaf, so
+      {/* A Link, not a full-load anchor: /liked is a listing, not a page, so
           the full-page-load rule (server-side re-resolution) doesn't apply and
           no arrived_via breadcrumb is written. */}
       <Link

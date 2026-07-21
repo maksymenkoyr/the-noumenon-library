@@ -15,7 +15,7 @@ import { getLikeCount } from "@/lib/engagement";
 import { devFields, resolvePage, type ResolvedPage } from "@/lib/resolvePage";
 import { getPage } from "@/lib/store";
 import { DevBadge } from "./dev-badge";
-import { CrystallizingLeaf, Leaf, PlaceholderLeaf } from "./leaf";
+import { CrystallizingPage, PageContent, PlaceholderPage } from "./page-content";
 import { Marks } from "./marks";
 import { Nav } from "./nav";
 import { Report } from "./report";
@@ -31,10 +31,10 @@ export default async function Page({
   // Force request-time rendering (same guard as app/operator/page.tsx),
   // before anything whose result must differ per request: the bare-root
   // redirect below would otherwise prerender with one frozen "random"
-  // address, and the committed-leaf branch touches no dynamic API when the
+  // address, and the committed-page branch touches no dynamic API when the
   // access gate is inert in production — raw pg queries are not a dynamic
   // signal — so Next could serve it from the full route cache, i.e. stale
-  // leaves and like counts.
+  // pages and like counts.
   await connection();
 
   const { address: segments } = await params;
@@ -51,7 +51,7 @@ export default async function Page({
 
   // One fast lookup decides the shape of the response. A committed page renders
   // synchronously (instant revisits, no fallback flash); only a first visit (or
-  // an in-flight one by another visitor) suspends behind the crystallizing leaf.
+  // an in-flight one by another visitor) suspends behind the crystallizing page.
   const existing = await getPage(canonical);
 
   // Dev overlay gate (lib/devMode): the badge is only rendered when this visitor
@@ -65,16 +65,16 @@ export default async function Page({
         <Nav nextHref={nextHref} />
       </header>
       {existing?.status === "ok" ? (
-        <CommittedLeaf
+        <CommittedPage
           address={canonical}
           text={existing.content ?? ""}
           devMode={devMode}
           {...devFields(existing.inputs, existing.model)}
         />
       ) : existing?.status === "taken_down" ? (
-        <PlaceholderLeaf variant="taken_down" />
+        <PlaceholderPage variant="taken_down" />
       ) : (
-        <Suspense fallback={<CrystallizingLeaf />}>
+        <Suspense fallback={<CrystallizingPage />}>
           <PageBody address={canonical} devMode={devMode} />
         </Suspense>
       )}
@@ -111,14 +111,14 @@ async function PageBody({
   }
 
   if (resolved === "explore" || resolved.status === "explore") {
-    return <PlaceholderLeaf variant="explore" />;
+    return <PlaceholderPage variant="explore" />;
   }
   if (resolved.status === "rate_limited") {
-    return <PlaceholderLeaf variant="rate_limited" />;
+    return <PlaceholderPage variant="rate_limited" />;
   }
   if (resolved.status === "ok") {
     return (
-      <CommittedLeaf
+      <CommittedPage
         address={address}
         text={resolved.text}
         devMode={devMode}
@@ -133,18 +133,18 @@ async function PageBody({
     );
   }
   // taken_down can surface here if a takedown lands while we waited.
-  return <PlaceholderLeaf variant="taken_down" />;
+  return <PlaceholderPage variant="taken_down" />;
 }
 
 /**
- * A committed leaf, its dev overlay, and its reader marks (press count + dwell
+ * A committed page, its dev overlay, and its reader marks (like count + dwell
  * timer). The like count is a fast indexed lookup fetched here so it's
  * co-located with the `ok` state — on the synchronous path it just adds one
  * quick query to the render; on the streamed path it resolves inside the
  * existing Suspense boundary. The dev badge (lib/devMode) only renders for a
  * visitor holding the dev grant; non-dev traffic sees no change.
  */
-async function CommittedLeaf({
+async function CommittedPage({
   address,
   text,
   devMode,
@@ -174,7 +174,7 @@ async function CommittedLeaf({
   const likeCount = await getLikeCount(address);
   return (
     <>
-      <Leaf>{text}</Leaf>
+      <PageContent>{text}</PageContent>
       {devMode && (
         <DevBadge
           model={model}

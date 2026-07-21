@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// The reading face for the page leaf itself — a book-like serif, distinct from
+// The reading face for the page itself — a book-like serif, distinct from
 // the sans/mono used for the library's chrome.
 const lora = Lora({
   variable: "--font-serif",

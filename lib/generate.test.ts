@@ -125,7 +125,7 @@ describe("generatePage fallback", () => {
 
   it("treats an empty completion as retryable and falls back", async () => {
     // Generate-once/store-forever: a blank completion must never be returned
-    // (it would crystallize as a permanently empty leaf).
+    // (it would crystallize as a permanently empty page).
     createMock
       .mockResolvedValueOnce(completion("   \n", 3))
       .mockResolvedValueOnce(completion("real text", 5));

@@ -5,15 +5,15 @@ import {
   admitEngagementWrite,
   canonicalizeAddress,
   getLikeCount,
-  pressLeaf,
+  likePage,
 } from "@/lib/engagement";
 
 /**
- * Press / un-press a leaf (docs/reference/architecture.md §8, Phase 10). The app's per-
+ * Like / unlike a page (docs/reference/architecture.md §8, Phase 10). The app's per-
  * reader state lives in the browser (localStorage); this endpoint only keeps the
- * anonymous aggregate count. Idempotency is the client's job — it sends a press
+ * anonymous aggregate count. Idempotency is the client's job — it sends a like
  * only on an actual toggle — so a hashed-IP throttle is all the abuse guard the
- * counter needs. Returns the new count so the leaf can reconcile its display.
+ * counter needs. Returns the new count so the page can reconcile its display.
  */
 export const runtime = "nodejs";
 
@@ -41,6 +41,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, count: await getLikeCount(canonical) });
   }
 
-  const count = await pressLeaf(canonical, pressed);
+  const count = await likePage(canonical, pressed);
   return NextResponse.json({ ok: true, count });
 }
