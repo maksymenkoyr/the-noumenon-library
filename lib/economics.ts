@@ -43,12 +43,15 @@ async function monthlySpendUsd(): Promise<number> {
   return Number(rows[0]?.cost_usd ?? 0);
 }
 
-/** Generations by this IP within the sliding rate-limit window. */
-async function recentGenerationCount(hash: string): Promise<number> {
+/** Generations by this IP within the given sliding window (seconds). */
+async function recentGenerationCount(
+  hash: string,
+  windowSeconds: number,
+): Promise<number> {
   const rows = await query<{ count: number }>(
     `SELECT count(*)::int AS count FROM rate_limit_hits
      WHERE ip_hash = $1 AND created_at > now() - make_interval(secs => $2)`,
-    [hash, config.rateLimitWindowSeconds],
+    [hash, windowSeconds],
   );
   return Number(rows[0]?.count ?? 0);
 }
@@ -56,8 +59,11 @@ async function recentGenerationCount(hash: string): Promise<number> {
 /**
  * Gate a would-be generation: global spend cap first (cheapest, one row), then
  * the per-visitor rate limit — only when we can identify the caller (no IP → no
- * rate limit rather than keying every anonymous hit together). Read-only; the
- * hit is recorded separately by noteGeneration once the generation is admitted.
+ * rate limit rather than keying every anonymous hit together). Two tiers share
+ * the one rate_limit_hits counter: a tight per-minute ceiling and a looser
+ * per-hour one, so pacing just under the minute limit doesn't escape entirely.
+ * Read-only; the hit is recorded separately by noteGeneration once the
+ * generation is admitted.
  */
 export async function checkAdmission(
   ctx: AdmissionContext,
@@ -68,9 +74,21 @@ export async function checkAdmission(
   }
 
   if (ctx.clientIp) {
-    const count = await recentGenerationCount(ipHash(ctx.clientIp));
-    if (count >= config.rateLimitPerMinute) {
-      devLog(`admission: rate limit hit (${count} in window) → explore-only`);
+    const hash = ipHash(ctx.clientIp);
+    const minuteCount = await recentGenerationCount(
+      hash,
+      config.rateLimitWindowSeconds,
+    );
+    if (minuteCount >= config.rateLimitPerMinute) {
+      devLog(`admission: rate limit hit (${minuteCount}/min) → rate-limited`);
+      return { ok: false, reason: "rate_limit" };
+    }
+    const hourCount = await recentGenerationCount(
+      hash,
+      config.rateLimitHourWindowSeconds,
+    );
+    if (hourCount >= config.rateLimitPerHour) {
+      devLog(`admission: rate limit hit (${hourCount}/hr) → rate-limited`);
       return { ok: false, reason: "rate_limit" };
     }
   }
@@ -82,16 +100,21 @@ export async function checkAdmission(
  * Record that an admitted generation is proceeding. Called for every generation
  * we let through — including ones that later fail moderation — so a crawler
  * hammering dead addresses still counts against its limit. Prunes rows outside
- * the window opportunistically so nothing is retained long-term (§12).
+ * the *longest* window opportunistically so nothing is retained long-term
+ * (§12) while still leaving enough history for the hourly tier to count.
  */
 export async function noteGeneration(ctx: AdmissionContext): Promise<void> {
   if (!ctx.clientIp) return;
   const hash = ipHash(ctx.clientIp);
+  const retentionSeconds = Math.max(
+    config.rateLimitWindowSeconds,
+    config.rateLimitHourWindowSeconds,
+  );
   await query("INSERT INTO rate_limit_hits (ip_hash) VALUES ($1)", [hash]);
   await query(
     `DELETE FROM rate_limit_hits
      WHERE ip_hash = $1 AND created_at < now() - make_interval(secs => $2)`,
-    [hash, config.rateLimitWindowSeconds],
+    [hash, retentionSeconds],
   );
 }
 

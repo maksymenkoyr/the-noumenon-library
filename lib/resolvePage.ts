@@ -19,11 +19,16 @@ import {
 
 /**
  * What a resolved address renders as. `ok`/`taken_down` mirror the stored row;
- * `explore` is a render-only state (no row persisted) — a generation/moderation
- * failure, or admission control refusing generation (spend cap / rate limit,
- * §10). `text` is the page content or the relevant placeholder copy.
+ * `explore` and `rate_limited` are both render-only states (no row persisted)
+ * from admission control refusing generation (§10): `explore` for the global
+ * spend cap (not this visitor's fault, so the copy points them onward)
+ * and `rate_limited` for this visitor's own per-IP ceiling (minute or hour
+ * tier, lib/economics.ts) — kept distinct so the reader gets a message about
+ * their own pace rather than the generic "still dark" copy. A bare generation/
+ * moderation failure also renders as `explore`. `text` is the page content or
+ * the relevant placeholder copy.
  */
-export type ResolvedStatus = "ok" | "taken_down" | "explore";
+export type ResolvedStatus = "ok" | "taken_down" | "explore" | "rate_limited";
 
 export interface ResolvedPage {
   status: ResolvedStatus;
@@ -83,6 +88,9 @@ const TAKEN_DOWN_PLACEHOLDER =
 const EXPLORE_ONLY_PLACEHOLDER =
   "This corner of the library is still dark — wander elsewhere and return later.";
 
+const RATE_LIMITED_PLACEHOLDER =
+  "You're wandering faster than the library can crystallize new pages. Pause a moment, then return.";
+
 /**
  * Resolve the page at a canonical address — the heart of the system
  * (docs/reference/architecture.md §2): lookup → reserve → generate → moderate → commit.
@@ -136,11 +144,17 @@ async function generateAndCommit(
 ): Promise<ResolvedPage> {
   // Admission control (§10, §2 step 4): gate the expensive path only. Over the
   // spend cap or this visitor's rate limit → release the reservation so the
-  // address stays un-crystallized (it can generate after the cap resets) and
-  // render explore-only rather than a real page.
+  // address stays un-crystallized (it can generate after the cap/window
+  // resets) and render a placeholder rather than a real page. The two
+  // reasons get distinct copy: a rate limit is about this visitor's own
+  // pace (rate_limited), while the spend cap is a global condition with
+  // nothing they can do differently (explore).
   const admission = await checkAdmission(ctx);
   if (!admission.ok) {
     await releaseReservation(address);
+    if (admission.reason === "rate_limit") {
+      return { status: "rate_limited", text: RATE_LIMITED_PLACEHOLDER };
+    }
     return { status: "explore", text: EXPLORE_ONLY_PLACEHOLDER };
   }
   // Count this generation before running it, so failures still throttle crawlers.

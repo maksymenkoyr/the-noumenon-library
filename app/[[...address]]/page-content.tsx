@@ -42,13 +42,18 @@ const PLACEHOLDER_COPY = {
   taken_down: "This page has been removed from the library.",
   explore:
     "This corner of the library is still dark — wander elsewhere and return later.",
+  rate_limited:
+    "You're wandering faster than the library can crystallize new pages. Pause a moment, then return.",
 } as const;
 
 /**
- * A page with no readable content: either taken down, or explore-only (the page
- * could not be crystallized right now — a generation/moderation failure, or
- * admission control refusing generation past the spend cap / rate limit (§10).
- * The explore variant offers the way onward.
+ * A page with no readable content: taken down, explore-only, or rate-limited.
+ * `explore` covers a generation/moderation failure or admission control
+ * refusing generation past the global spend cap (§10) — not this visitor's
+ * fault, so it offers the way onward. `rate_limited` is specifically this
+ * visitor's own per-IP ceiling (lib/economics.ts); it deliberately has no
+ * onward link — following it would just re-trigger the same limit — the ask
+ * is to slow down, not to keep clicking.
  */
 export function PlaceholderPage({
   variant,

@@ -88,9 +88,11 @@ export default async function Page({
  * client IP (for the rate limit) and touches admission control — cache hits
  * render synchronously above and stay free. resolvePage throws on a
  * generation/moderation failure or wait timeout (it releases the reservation
- * first, so nothing is persisted) and returns `explore` when admission control
- * refuses generation (spend cap / rate limit) — both render explore-only rather
- * than an error page. The address simply stays dark until a later visit.
+ * first, so nothing is persisted) — rendered as `explore` — and returns
+ * `explore` or `rate_limited` when admission control refuses generation
+ * (spend cap vs. this visitor's own rate limit, lib/resolvePage.ts) — none of
+ * these persist a row or throw to an error page. The address simply stays
+ * dark until a later visit.
  */
 async function PageBody({
   address,
@@ -110,6 +112,9 @@ async function PageBody({
 
   if (resolved === "explore" || resolved.status === "explore") {
     return <PlaceholderPage variant="explore" />;
+  }
+  if (resolved.status === "rate_limited") {
+    return <PlaceholderPage variant="rate_limited" />;
   }
   if (resolved.status === "ok") {
     return (
