@@ -3,7 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 
 /**
- * The content-report affordance for a committed leaf (docs/reference/legal.md): a quiet
+ * The content-report affordance for a committed page (docs/reference/legal.md): a quiet
  * `report` control that expands to an optional one-line reason, POSTing to
  * /api/report — the row lands in the operator's queue whatever happens to the
  * notification email. The mailto link stays beside it as the manual channel
@@ -34,7 +34,7 @@ function writeReported(address: string): void {
   window.dispatchEvent(new Event(REPORT_EVENT));
 }
 
-// Same useSyncExternalStore idiom as the leaf marks: stable `false` server
+// Same useSyncExternalStore idiom as the page marks: stable `false` server
 // snapshot (no hydration mismatch), re-render on our own writes and cross-tab.
 function useReported(address: string): boolean {
   return useSyncExternalStore(

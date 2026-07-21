@@ -14,10 +14,10 @@ import { closePool, query } from "./db";
 import {
   admitEngagementWrite,
   canonicalizeAddress,
-  dislikeLeaf,
+  dislikePage,
   getDislikeCount,
   getLikeCount,
-  pressLeaf,
+  likePage,
   recordEvents,
   type RawEvent,
 } from "./engagement";
@@ -33,7 +33,7 @@ beforeEach(async () => {
     "TRUNCATE pages, page_likes, page_dislikes, engagement, engagement_rate_limit_hits, page_events CASCADE",
   );
   // The signal tables FK to pages(address); marks only ever attach to a
-  // committed leaf, so give the tests a real page row.
+  // committed page, so give the tests a real page row.
   await query("INSERT INTO pages (address, status) VALUES ($1, 'ok')", [ADDR]);
 });
 
@@ -63,45 +63,45 @@ describe("canonicalizeAddress", () => {
   });
 });
 
-describe("pressLeaf / getLikeCount", () => {
+describe("likePage / getLikeCount", () => {
   it("starts at zero", async () => {
     expect(await getLikeCount(ADDR)).toBe(0);
   });
 
-  it("increments on press and decrements on un-press", async () => {
-    expect(await pressLeaf(ADDR, true)).toBe(1);
-    expect(await pressLeaf(ADDR, true)).toBe(2);
+  it("increments on like and decrements on unlike", async () => {
+    expect(await likePage(ADDR, true)).toBe(1);
+    expect(await likePage(ADDR, true)).toBe(2);
     expect(await getLikeCount(ADDR)).toBe(2);
-    expect(await pressLeaf(ADDR, false)).toBe(1);
+    expect(await likePage(ADDR, false)).toBe(1);
     expect(await getLikeCount(ADDR)).toBe(1);
   });
 
   it("never drops below zero", async () => {
-    expect(await pressLeaf(ADDR, false)).toBe(0);
-    expect(await pressLeaf(ADDR, false)).toBe(0);
+    expect(await likePage(ADDR, false)).toBe(0);
+    expect(await likePage(ADDR, false)).toBe(0);
   });
 });
 
-describe("dislikeLeaf / getDislikeCount", () => {
+describe("dislikePage / getDislikeCount", () => {
   it("starts at zero", async () => {
     expect(await getDislikeCount(ADDR)).toBe(0);
   });
 
   it("increments on mark and decrements on unmark", async () => {
-    expect(await dislikeLeaf(ADDR, true)).toBe(1);
-    expect(await dislikeLeaf(ADDR, true)).toBe(2);
+    expect(await dislikePage(ADDR, true)).toBe(1);
+    expect(await dislikePage(ADDR, true)).toBe(2);
     expect(await getDislikeCount(ADDR)).toBe(2);
-    expect(await dislikeLeaf(ADDR, false)).toBe(1);
+    expect(await dislikePage(ADDR, false)).toBe(1);
     expect(await getDislikeCount(ADDR)).toBe(1);
   });
 
   it("never drops below zero", async () => {
-    expect(await dislikeLeaf(ADDR, false)).toBe(0);
-    expect(await dislikeLeaf(ADDR, false)).toBe(0);
+    expect(await dislikePage(ADDR, false)).toBe(0);
+    expect(await dislikePage(ADDR, false)).toBe(0);
   });
 
   it("does not touch the like counter", async () => {
-    await dislikeLeaf(ADDR, true);
+    await dislikePage(ADDR, true);
     expect(await getLikeCount(ADDR)).toBe(0);
   });
 });

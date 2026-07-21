@@ -19,7 +19,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await query("TRUNCATE pages, page_reports CASCADE");
   // Reports FK to pages(address); the report control only renders on a
-  // committed leaf, so give the tests real page rows.
+  // committed page, so give the tests real page rows.
   await query("INSERT INTO pages (address, status) VALUES ($1, 'ok'), ($2, 'ok')", [
     ADDR,
     OTHER,

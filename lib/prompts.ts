@@ -83,7 +83,7 @@ const VARIANTS: Record<string, PromptBuilder> = {
         "know what it is or where it sits.",
       "",
       [
-        "The page may be a brief fragment or fill the leaf, but no more than " +
+        "The text may be a brief fragment or fill the page, but no more than " +
           `about ${maxWords} words, and it must read as a finished whole — ` +
           "never cut off mid-thought.",
         ...constraints,

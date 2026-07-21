@@ -4,11 +4,11 @@ import { getClientIp } from "@/lib/clientIp";
 import {
   admitEngagementWrite,
   canonicalizeAddress,
-  dislikeLeaf,
+  dislikePage,
 } from "@/lib/engagement";
 
 /**
- * Mark / unmark a leaf "not for me" — the silent sibling of /api/like. Same
+ * Mark / unmark a page "not for me" — the silent sibling of /api/like. Same
  * shape (per-reader state in localStorage, hashed-IP throttle, idempotency is
  * the client's job), with one deliberate difference: the aggregate count is
  * NEVER returned. The dislike is a research signal for the operator's insight
@@ -38,6 +38,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false });
   }
 
-  await dislikeLeaf(canonical, disliked);
+  await dislikePage(canonical, disliked);
   return NextResponse.json({ ok: true });
 }

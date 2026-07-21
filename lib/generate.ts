@@ -255,7 +255,7 @@ export async function generatePage(
       if (!text.trim()) {
         // An empty completion (truncation, upstream filtering, a glitching
         // model) must never crystallize: generate-once/store-forever would
-        // make the blank leaf permanent. Treat it like any other retryable
+        // make the blank page permanent. Treat it like any other retryable
         // model failure and fall through the rest of the pool.
         void recordModelCall(attempt.slug, { ms: durationMs, ok: false });
         lastErr = new Error(`Empty completion from ${attempt.slug}`);

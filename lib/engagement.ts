@@ -4,7 +4,7 @@ import { query } from "./db";
 import { ipHash } from "./ipHash";
 
 /**
- * Reader signals — the "like"/press count and dwell-time research signal
+ * Reader signals — the like count and dwell-time research signal
  * (docs/reference/architecture.md §8, Phase 10). Two storage idioms, both mirroring the
  * economics counter tables: an aggregate per-page counter (page_likes, like
  * monthly_spend) and an append-only event log (page_events, like rate_limit_hits).
@@ -37,12 +37,12 @@ export function canonicalizeAddress(raw: unknown): string | null {
 }
 
 /**
- * Apply a press (+1) or un-press (-1) to a page's aggregate like count and
- * return the new total. Atomic upsert so concurrent presses accumulate; the
- * count is clamped at 0 so a stray un-press can't drive it negative. The FK to
- * pages(address) holds because marks only render on committed (`ok`) leaves.
+ * Apply a like (+1) or unlike (-1) to a page's aggregate like count and
+ * return the new total. Atomic upsert so concurrent likes accumulate; the
+ * count is clamped at 0 so a stray unlike can't drive it negative. The FK to
+ * pages(address) holds because marks only render on committed (`ok`) pages.
  */
-export async function pressLeaf(
+export async function likePage(
   address: string,
   pressed: boolean,
 ): Promise<number> {
@@ -69,11 +69,11 @@ export async function getLikeCount(address: string): Promise<number> {
 
 /**
  * Apply a "not for me" mark (+1) or unmark (-1) — the silent counterpart of
- * pressLeaf, against page_dislikes. The returned count is for tests and the
+ * likePage, against page_dislikes. The returned count is for tests and the
  * operator's insight views only; it is never sent to readers (the dislike is a
  * research signal, not a public score).
  */
-export async function dislikeLeaf(
+export async function dislikePage(
   address: string,
   disliked: boolean,
 ): Promise<number> {

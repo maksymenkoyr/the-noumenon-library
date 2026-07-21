@@ -78,7 +78,7 @@ export function devFields(
 }
 
 const TAKEN_DOWN_PLACEHOLDER =
-  "This leaf has been removed from the library.";
+  "This page has been removed from the library.";
 
 const EXPLORE_ONLY_PLACEHOLDER =
   "This corner of the library is still dark — wander elsewhere and return later.";
