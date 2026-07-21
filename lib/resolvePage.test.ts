@@ -235,9 +235,11 @@ describe("resolvePage admission control (§10)", () => {
     for (const addr of ["c/1/1/1/1", "c/1/1/1/2", "c/1/1/1/3"]) {
       expect((await resolvePage(addr, ctx)).status).toBe("ok");
     }
-    // …the fourth is refused and leaves no row.
+    // …the fourth is refused (this visitor's own ceiling, not the shared
+    // spend cap) and leaves no row.
     const fourth = await resolvePage("c/1/1/1/4", ctx);
-    expect(fourth.status).toBe("explore");
+    expect(fourth.status).toBe("rate_limited");
+    expect(fourth.text).toMatch(/wandering faster/i);
     expect(await getPage("c/1/1/1/4")).toBeNull();
     expect(generateMock).toHaveBeenCalledTimes(3);
   });
