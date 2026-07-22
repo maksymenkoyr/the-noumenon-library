@@ -24,12 +24,13 @@
 // npm run invite -- "bob"
 //
 // Preview deployments: the token is only redeemable against whatever
-// DATABASE_URL this script connects to, so a token minted against the
-// production DB (the default, via .env.local) will never redeem on a preview
-// deployment reading a different (e.g. Neon-branched) DB. To invite someone
-// to a preview:
-//   1. Pull the preview env once: npx vercel env pull .env.preview --environment=preview
-//   2. npm run invite:preview -- --url https://<preview-host>.vercel.app "alice"
+// DATABASE_URL this script connects to, so a token minted against the local
+// DB (the default, via .env.local) will never redeem on a preview deployment
+// reading a different (e.g. Neon-branched) DB. To invite someone to a
+// preview, run with the preview DB's URL explicit and inline (fetched from
+// Neon, not a persisted file — DB URLs are Sensitive in Vercel and can't be
+// pulled back via `vercel env pull`):
+//   DATABASE_URL=<preview-db-url> node scripts/invite.mjs --url https://<preview-host>.vercel.app "alice"
 // This mints the token in the preview DB and prints a link pointing at the
 // preview host — both must match the preview deployment for redemption to
 // succeed.

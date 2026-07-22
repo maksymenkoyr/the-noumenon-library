@@ -1,0 +1,38 @@
+name: Migrate schema
+
+# Apply lib/schema.sql (idempotent, scripts/migrate.mjs) to a target database.
+# Credentials come from GitHub Actions secrets, never from Vercel: DB URLs are
+# flagged Sensitive there, which makes them write-only — `vercel env pull` and
+# the dashboard never return the value again. CI is the source of truth for
+# automation credentials, same as the nightly backup job
+# (.github/workflows/backup.yml, DATABASE_URL_UNPOOLED).
+#
+# Requires repository secrets: DATABASE_URL_UNPOOLED (prod, already present for
+# backups) and DATABASE_URL_PREVIEW_UNPOOLED (preview's dedicated database).
+# Both must be the DIRECT (non-pooled) connection string — DDL over PgBouncer's
+# pooled endpoint can misbehave.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which database to migrate
+        type: choice
+        options: [preview, prod]
+        required: true
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: >-
+        ${{ inputs.target == 'prod'
+            && secrets.DATABASE_URL_UNPOOLED
+            || secrets.DATABASE_URL_PREVIEW_UNPOOLED }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: node scripts/migrate.mjs
