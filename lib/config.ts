@@ -178,7 +178,9 @@ export const config = {
   // API call per newly-reported page, fail-open. All three unset by default —
   // reports still land in page_reports and /operator, just without the push.
   // The from-address domain must be verified in Resend for production sends;
-  // the resend.dev default only works for sends to the account owner.
+  // onboarding@resend.dev is Resend's shared sandbox sender and only delivers
+  // to the Resend account owner's own address (arbitrary local-parts on
+  // resend.dev are not valid senders).
   get resendApiKey() {
     return process.env.RESEND_API_KEY ?? "";
   },
@@ -186,7 +188,7 @@ export const config = {
     return process.env.REPORT_NOTIFY_EMAIL ?? "";
   },
   get reportFromEmail() {
-    return process.env.REPORT_FROM_EMAIL ?? "reports@resend.dev";
+    return process.env.REPORT_FROM_EMAIL ?? "onboarding@resend.dev";
   },
   // True only in a real production deploy — gates the fail-closed moderation
   // guard (lib/moderate.ts): never store unmoderated content in production.

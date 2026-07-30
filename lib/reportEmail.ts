@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { monitor } from "./monitor";
 
 /**
  * Operator email for a new content report — one HTTPS POST to Resend, plain
@@ -25,7 +26,7 @@ export async function sendReportEmail(report: {
   ].join("\n");
 
   try {
-    await fetch("https://api.resend.com/emails", {
+    const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         authorization: `Bearer ${apiKey}`,
@@ -38,7 +39,21 @@ export async function sendReportEmail(report: {
         text,
       }),
     });
-  } catch {
-    // Best-effort — the report row is already stored; swallow.
+    if (!res.ok) {
+      // A rejected send (bad sender domain, revoked key, ...) is otherwise
+      // silent — the report row is already stored either way, so this is
+      // visibility only, not a retry.
+      await monitor("report_email_failed", {
+        address: report.address,
+        status: res.status,
+      });
+    }
+  } catch (err) {
+    // Best-effort — the report row is already stored; swallow, but still
+    // surface it the same way a rejected response would be.
+    await monitor("report_email_failed", {
+      address: report.address,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
