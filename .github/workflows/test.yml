@@ -1,0 +1,59 @@
+name: CI
+
+# Typecheck + lint + the full test suite on every push to main and every PR.
+#
+# Needs NO repository secrets, deliberately — unlike migrate.yml and backup.yml,
+# which hold real database credentials because Vercel marks DB URLs Sensitive
+# (write-only, never readable again). Nothing here touches Neon, R2, or any
+# provider: the integration suites run against the throwaway Postgres service
+# container below, and every test that would otherwise reach an LLM mocks the
+# provider client. So this workflow is safe to run on forked PRs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # The integration suites (lib/store.test.ts, economics, engagement,
+      # registry, insights, reports, modelStats) need a real Postgres — they
+      # apply lib/schema.sql themselves in beforeAll and TRUNCATE between
+      # cases, so there is no separate migrate step in this job. Match Neon's
+      # server major, same as backup.yml.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: noumenon_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # The tests read TEST_DATABASE_URL and assign it to DATABASE_URL
+      # themselves; they fall back to a bare localhost URL that would only work
+      # by accident here, so set it explicitly.
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/noumenon_test
+      # Do NOT add provider keys here. The suites set their own dummy
+      # OPENROUTER_API_KEY and mock getClient(), and lib/registry.test.ts
+      # asserts the "provider with no key is filtered out" path by relying on
+      # GOOGLE_API_KEY being unset — a real key in this env would fail it.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
+      # Serial by design, not a misconfiguration: vitest.config.ts sets
+      # fileParallelism: false because every integration suite shares this one
+      # database. The whole run is still only a few seconds.
+      - name: Test
+        run: npm test
