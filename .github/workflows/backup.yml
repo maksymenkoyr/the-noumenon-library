@@ -50,12 +50,6 @@ jobs:
       - run: npm ci
       - name: Create + upload backup
         id: backup
-        # BACKUP_DIR belongs here, not in the job-level env above: the `runner`
-        # context is only available at step level. Setting it on the job made
-        # the whole file invalid, which is why GitHub never registered this
-        # workflow's cron and the nightly backup silently never ran.
-        env:
-          BACKUP_DIR: ${{ runner.temp }}
         run: npm run backup
       - name: Test-restore + verify
         run: npm run restore:verify -- "${{ steps.backup.outputs.dumpfile }}" "${{ steps.backup.outputs.pages }}"

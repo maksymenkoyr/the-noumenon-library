@@ -178,7 +178,9 @@ export const config = {
   // API call per newly-reported page, fail-open. All three unset by default —
   // reports still land in page_reports and /operator, just without the push.
   // The from-address domain must be verified in Resend for production sends;
-  // the resend.dev default only works for sends to the account owner.
+  // onboarding@resend.dev is Resend's shared sandbox sender and only delivers
+  // to the Resend account owner's own address (arbitrary local-parts on
+  // resend.dev are not valid senders).
   get resendApiKey() {
     return process.env.RESEND_API_KEY ?? "";
   },
@@ -186,7 +188,7 @@ export const config = {
     return process.env.REPORT_NOTIFY_EMAIL ?? "";
   },
   get reportFromEmail() {
-    return process.env.REPORT_FROM_EMAIL ?? "reports@resend.dev";
+    return process.env.REPORT_FROM_EMAIL ?? "onboarding@resend.dev";
   },
   // True only in a real production deploy — gates the fail-closed moderation
   // guard (lib/moderate.ts): never store unmoderated content in production.
@@ -195,6 +197,16 @@ export const config = {
   // moderation guard is deliberately relaxed so pages can crystallize while
   // MODERATION_ENABLED=false. Must be UNSET before any genuinely public launch.
   allowUnmoderated: process.env.ALLOW_UNMODERATED === "true",
+  // Whether the gate in proxy.ts actually blocks traffic, independent of
+  // whether a signing secret is configured. Defaults on (today's behavior)
+  // whenever ACCESS_GATE_ENABLED is unset. Set to false for the public
+  // deploy: the doors open to everyone, but the secret stays set so the
+  // operator (lib/operatorMode) and dev-overlay (lib/devMode) claims carried
+  // by existing invite cookies keep working — "gate open" must not mean
+  // "operator surface exposed" (see lib/operatorMode.ts).
+  accessGateEnabled: process.env.ACCESS_GATE_ENABLED
+    ? process.env.ACCESS_GATE_ENABLED === "true"
+    : true,
   // Private-access gate (proxy.ts + app/api/access, lib/access.ts). When set,
   // the whole site is gated behind reusable invite links (scripts/invite.mjs)
   // that redeem into an HMAC-signed session cookie. Unset (local

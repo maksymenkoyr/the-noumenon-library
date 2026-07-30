@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { readSessionClaims, signSession, verifySession } from "./access";
+import {
+  isGateActive,
+  readSessionClaims,
+  signSession,
+  verifySession,
+} from "./access";
 
 const SECRET = "test-signing-secret";
 
@@ -92,5 +97,20 @@ describe("session cookie", () => {
     const tampered = cookie.replace("v2.0.0.", "v2.0.1.");
     expect(await verifySession(SECRET, tampered)).toBe(false);
     expect(await readSessionClaims(SECRET, tampered)).toBeNull();
+  });
+});
+
+describe("isGateActive", () => {
+  it("blocks traffic when a secret is set and the gate flag is on", () => {
+    expect(isGateActive(SECRET, true)).toBe(true);
+  });
+
+  it("goes inert when the gate flag is off, even with a secret set", () => {
+    expect(isGateActive(SECRET, false)).toBe(false);
+  });
+
+  it("goes inert with no secret, regardless of the flag", () => {
+    expect(isGateActive("", true)).toBe(false);
+    expect(isGateActive("", false)).toBe(false);
   });
 });

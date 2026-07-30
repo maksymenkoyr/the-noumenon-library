@@ -23,6 +23,17 @@
 
 export const COOKIE_NAME = "nl_session";
 
+/**
+ * Whether the gate should actually block a request: needs both a signing
+ * secret (something to verify sessions against) and the gate-enabled flag
+ * (lib/config.ts accessGateEnabled) — the public deploy keeps the secret set
+ * for operator/dev claims but flips this flag off so traffic stops being
+ * blocked. Pure, so proxy.ts's decision is unit-testable without a request.
+ */
+export function isGateActive(secret: string, gateEnabled: boolean): boolean {
+  return Boolean(secret) && gateEnabled;
+}
+
 const encoder = new TextEncoder();
 
 /** URL-safe base64 of raw bytes (no padding). */
