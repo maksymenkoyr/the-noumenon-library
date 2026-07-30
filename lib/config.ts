@@ -197,6 +197,16 @@ export const config = {
   // moderation guard is deliberately relaxed so pages can crystallize while
   // MODERATION_ENABLED=false. Must be UNSET before any genuinely public launch.
   allowUnmoderated: process.env.ALLOW_UNMODERATED === "true",
+  // Whether the gate in proxy.ts actually blocks traffic, independent of
+  // whether a signing secret is configured. Defaults on (today's behavior)
+  // whenever ACCESS_GATE_ENABLED is unset. Set to false for the public
+  // deploy: the doors open to everyone, but the secret stays set so the
+  // operator (lib/operatorMode) and dev-overlay (lib/devMode) claims carried
+  // by existing invite cookies keep working — "gate open" must not mean
+  // "operator surface exposed" (see lib/operatorMode.ts).
+  accessGateEnabled: process.env.ACCESS_GATE_ENABLED
+    ? process.env.ACCESS_GATE_ENABLED === "true"
+    : true,
   // Private-access gate (proxy.ts + app/api/access, lib/access.ts). When set,
   // the whole site is gated behind reusable invite links (scripts/invite.mjs)
   // that redeem into an HMAC-signed session cookie. Unset (local

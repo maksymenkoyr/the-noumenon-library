@@ -36,7 +36,6 @@ jobs:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
       MONITOR_WEBHOOK_URL: ${{ secrets.MONITOR_WEBHOOK_URL }}
       TARGET_DATABASE_URL: postgres://postgres:postgres@localhost:5432/verify
-      BACKUP_DIR: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
