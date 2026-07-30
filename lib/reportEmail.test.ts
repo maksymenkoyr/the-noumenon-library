@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Mock monitoring so we can assert which failures get surfaced, same pattern
+// as pipeline.test.ts.
+vi.mock("./monitor", () => ({ monitor: vi.fn() }));
+
+import { monitor } from "./monitor";
 import { sendReportEmail } from "./reportEmail";
 
+const monitorMock = vi.mocked(monitor);
 const REPORT = { address: "io-9/3/2/17/308", reason: "looks broken" };
 
 describe("sendReportEmail", () => {
@@ -9,6 +16,7 @@ describe("sendReportEmail", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockClear();
+    monitorMock.mockReset();
   });
 
   afterEach(() => {
@@ -58,10 +66,32 @@ describe("sendReportEmail", () => {
     expect(body.text).toContain("(none given)");
   });
 
-  it("swallows a failed send (fail-open)", async () => {
+  it("swallows a failed send (fail-open) but reports it to monitor", async () => {
     vi.stubEnv("RESEND_API_KEY", "re_test_key");
     vi.stubEnv("REPORT_NOTIFY_EMAIL", "operator@example.com");
     fetchMock.mockRejectedValueOnce(new Error("network down"));
     await expect(sendReportEmail(REPORT)).resolves.toBeUndefined();
+    expect(monitorMock).toHaveBeenCalledWith("report_email_failed", {
+      address: REPORT.address,
+      error: "network down",
+    });
+  });
+
+  it("reports a non-2xx Resend response to monitor without throwing", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test_key");
+    vi.stubEnv("REPORT_NOTIFY_EMAIL", "operator@example.com");
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 403 }));
+    await expect(sendReportEmail(REPORT)).resolves.toBeUndefined();
+    expect(monitorMock).toHaveBeenCalledWith("report_email_failed", {
+      address: REPORT.address,
+      status: 403,
+    });
+  });
+
+  it("does not call monitor on a successful send", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test_key");
+    vi.stubEnv("REPORT_NOTIFY_EMAIL", "operator@example.com");
+    await sendReportEmail(REPORT);
+    expect(monitorMock).not.toHaveBeenCalled();
   });
 });
