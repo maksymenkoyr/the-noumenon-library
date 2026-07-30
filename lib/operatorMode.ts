@@ -7,11 +7,13 @@ import { config } from "./config";
  * insight views). Same claim mechanism as lib/devMode: a stateless read of the
  * signed session cookie, no DB lookup.
  *
- * Deliberately stricter than getDevMode: there is no config fallback. Without
- * a signing secret the gate (proxy.ts) is inert and anyone can read the
- * cookie-free site, so an operator-only surface must 404 rather than open —
- * "inert gate" must never mean "operator page public". Server-component only
- * (reads cookies()).
+ * Deliberately stricter than getDevMode: there is no config fallback. The
+ * gate (proxy.ts) can go inert two ways — no signing secret at all, or a
+ * secret present but ACCESS_GATE_ENABLED=false (the public deploy) — and
+ * either way anyone can read the cookie-free site. An operator-only surface
+ * must 404 rather than open in both cases, so this checks the secret alone
+ * and ignores the gate-enabled flag entirely: "gate open to the public" must
+ * never mean "operator page public". Server-component only (reads cookies()).
  */
 export async function getOperatorMode(): Promise<boolean> {
   const secret = config.accessSigningSecret;

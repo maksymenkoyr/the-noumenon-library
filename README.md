@@ -1,22 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# The Noumenon Library
 
-## Getting Started
+An endless, shared library of pages that do not exist until someone walks into
+them. Addresses are Borges-style coordinates —
+`/{gallery}/{wall}/{shelf}/{volume}/{page}` (e.g. `/io-9/3/2/17/308`). The
+first visitor to an address triggers a language model to crystallize a page
+there; it is then stored forever, identical for every visitor after. There is
+no search — you can only wander: jump to a random address, step to the next
+one, or type a coordinate.
 
-First, run the development server:
+Every page is **machine-generated fiction**. Nothing here is a statement of
+fact, and any resemblance to real texts, events, or people is coincidental.
+See [`/about`](https://the-noumenon-library.vercel.app/about) for the full
+notice, privacy posture, and how to report content.
+
+This is a non-commercial art project — no ads, no accounts, nothing for sale —
+released under the **GNU Affero General Public License v3**. This repository
+is that license's source requirement.
+
+## Concept and architecture
+
+The `docs/` directory is a project vault covering the concept, architecture,
+generation pipeline, economics/safety controls, and legal posture in depth.
+It's gitignored (its own repo) rather than published here; if you're reading
+this without it, ask the maintainer for access, or treat the code itself —
+particularly the comments in `lib/` — as the primary reference.
+
+## Running locally
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Open [http://localhost:3000](http://localhost:3000). The bare root redirects
+to a random address (`app/[[...address]]/page.tsx`); without a `DATABASE_URL`
+or provider key, only cached pages resolve.
 
 ## Environment variables
 
@@ -24,21 +42,26 @@ Copy `.env.example` to `.env.local` and fill in what you need — at minimum
 `DATABASE_URL` and one of `OPENROUTER_API_KEY` / `GOOGLE_API_KEY` (the model
 pool's two providers, `lib/providers.ts`) to generate anything new. Every
 variable is server-only (read in `lib/config.ts`); none are `NEXT_PUBLIC_*`.
-See `docs/reference/architecture.md` §11 for the full annotated list.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Database
 
-## Learn More
+The schema (`lib/schema.sql`) is a single idempotent file, applied with:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run db:migrate
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`npm run invite` issues a private-access link (`scripts/invite.mjs`) when
+`ACCESS_SIGNING_SECRET` is configured — see `.env.example` for the gate's two
+env vars. `npm run takedown` blanks a reported address; `npm run backup` /
+`npm run restore:verify` handle off-provider Postgres backups to R2.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Tests
 
-## Deploy on Vercel
+```bash
+npm test
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Most suites need a local Postgres at `TEST_DATABASE_URL`
+(`postgres://localhost:5432/noumenon_test` by default) — they apply
+`lib/schema.sql` and run against it directly.

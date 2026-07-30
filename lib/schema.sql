@@ -364,14 +364,24 @@ INSERT INTO model_registry (slug, provider, task, enabled, weight, temperature, 
   ('anthropic/claude-opus-4.8',      'openrouter', 'generation', false, 0,  0.9, 1000, false)
 ON CONFLICT (slug, task) DO NOTHING;
 
--- Moderation chain: temp 0, max_tokens 5, reasoning off, no variety by design
--- (docs/architecture.md §7 — an extra chain link is another chance to
--- wrongly FAIL benign-but-dark content). Walked in `order`
+-- Moderation chain: temp 0, max_tokens 5, reasoning off. Walked in `order`
 -- (lib/registry.ts moderationChain) until a clear PASS/FAIL.
+--
+-- docs/architecture.md §7's "no variety by design" caution (an extra link is
+-- another chance to wrongly FAIL benign-but-dark content) applies to an
+-- any-fail chain. This chain is serial-first-verdict (lib/moderate.ts): a
+-- later link only runs when every earlier one abstains or errors, so it adds
+-- no false-FAIL risk on the normal path — it only supplies a verdict where the
+-- chain would otherwise throw and leave the address dark. Public-launch
+-- redundancy: Haiku-only was a single point of failure (one outage darkens
+-- every first-visit); orders 3-4 are a paid fallback pair so the chain
+-- degrades to explore-only rather than throwing. Cost is negligible at
+-- max_tokens=5.
 INSERT INTO model_registry (slug, provider, task, enabled, "order", temperature, max_tokens, reasoning_enabled) VALUES
   -- Gemini 3.1 Flash-Lite: same UNVERIFIED-slug caveat as the generation row
-  -- above; also seeded disabled pending live resolution. Until then,
-  -- moderation runs Haiku-only (order 2 promotes to the sole active model).
-  ('gemini-3.1-flash-lite',      'google',     'moderation', false, 1, 0, 5, false),
-  ('anthropic/claude-haiku-4.5', 'openrouter', 'moderation', true,  2, 0, 5, false)
+  -- above; also seeded disabled pending live resolution.
+  ('gemini-3.1-flash-lite',        'google',     'moderation', false, 1, 0, 5, false),
+  ('anthropic/claude-haiku-4.5',   'openrouter', 'moderation', true,  2, 0, 5, false),
+  ('mistralai/mistral-large-2512', 'openrouter', 'moderation', true,  3, 0, 5, false),
+  ('deepseek/deepseek-v4-flash',   'openrouter', 'moderation', true,  4, 0, 5, false)
 ON CONFLICT (slug, task) DO NOTHING;
