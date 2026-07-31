@@ -32,9 +32,22 @@ function getPool(): Pool {
   return globalThis.__noumenonPool;
 }
 
+/**
+ * Run one query against the shared pool.
+ *
+ * `op` names the calling operation as `"<module>.<function>"` (e.g.
+ * `"store.commitPage"`) and rides along on the `db_query_failed` monitor event.
+ * Every query in the app funnels through here, so without it the event can't
+ * distinguish a best-effort telemetry write (`modelStats.recordModelCall`,
+ * safely ignorable) from a charter-critical one (`store.commitPage`, a page
+ * possibly lost — §9). Treat the label as a query surface: a drain aggregates
+ * on it, so keep existing values stable. It defaults to `"unknown"` rather than
+ * being required so ad-hoc callers (test schema loads) stay ergonomic.
+ */
 export async function query<Row extends object = Record<string, unknown>>(
   text: string,
   params: unknown[] = [],
+  op = "unknown",
 ): Promise<Row[]> {
   try {
     const result = await getPool().query(text, params);
@@ -43,6 +56,7 @@ export async function query<Row extends object = Record<string, unknown>>(
     // The store is the library's only source of truth (§9) — surface DB failures
     // as a structured, alertable event. Re-throw so callers behave unchanged.
     await monitor("db_query_failed", {
+      op,
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
