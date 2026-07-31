@@ -140,7 +140,24 @@ R2 (off-provider, so a Neon account-level failure isn't fatal).
 An unrestorable backup is not a backup, so `.github/workflows/backup.yml`
 immediately test-restores each fresh dump into a throwaway `postgres:17` service
 container and asserts that the page count matches source and every committed
-page keeps its `content_hash`. Failures ping a webhook.
+page keeps its `content_hash`. Failures ping Telegram.
+
+### 5. Notice when it breaks
+
+Vercel Hobby keeps no log history, so a failure written only to stderr is a
+failure nobody will ever read. `lib/monitor.ts` emits one line of structured
+JSON per event *and* pushes it to Telegram when `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID` are set — making the chat, not the platform, the durable
+record. Pushes are throttled per event name, because a DB outage fires
+`db_query_failed` on every request and an alert lost to a rate-limit flood is no
+alert at all.
+
+Liveness is separate from errors: `GET /api/health` probes the store and answers
+`{"ok":true}` or a 503. It is the one route excluded from the invite gate, since
+every other path answers 401 by design and an outside checker could not
+otherwise tell "running" from "broken". `.github/workflows/uptime.yml` polls it
+and alerts the same way — though a scheduled Action is a fallback, not a real
+uptime monitor; point an external one at the same URL.
 
 ## Generation
 
@@ -184,9 +201,10 @@ per-page provenance, which is how prompt changes are actually evaluated.
 | Store | Postgres (Neon in prod, local Postgres in dev) via raw `pg` — no ORM |
 | Schema | one idempotent `lib/schema.sql`: 14 tables, 4 views |
 | LLM | `openai` SDK as a generic OpenAI-compatible client → OpenRouter, Google |
-| Tests | Vitest — 187 tests across 19 files |
+| Tests | Vitest — 196 tests across 20 files |
 | Hosting | Vercel (git-connected); GitHub Actions for CI, migrations, backups |
 | Backups | Cloudflare R2 via `aws4fetch` |
+| Alerting | Telegram bot API via `fetch` — no SDK, no error-tracking vendor |
 
 All business logic lives in `lib/`; routes and components are thin adapters that
 call the same functions. The server component `await`s `resolvePage()` directly
