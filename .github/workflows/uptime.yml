@@ -1,0 +1,63 @@
+name: Uptime check
+
+# Liveness probe against production (app/api/health, excluded from the invite
+# gate in proxy.ts). Every other path answers 401 by design, so this endpoint is
+# the only thing an outside checker can read a verdict from.
+#
+# Requires optional repository secrets TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID to
+# alert; without them the run still fails visibly in the Actions tab, silently.
+#
+# Caveat, deliberately recorded: GitHub's scheduled runners are best-effort and
+# routinely fire 5-15 minutes late, and GitHub disables cron in repositories
+# after 60 days of inactivity — the exact failure mode that hid the nightly
+# backup for weeks. Treat this as the versioned fallback and point a free
+# external monitor (UptimeRobot, Better Stack) at the same URL as the primary.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      HEALTH_URL: https://the-noumenon-library.vercel.app/api/health
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - name: Probe /api/health
+        id: probe
+        run: |
+          # Separate the body from the status so a 503 with a valid body and a
+          # 200 with a broken body are both caught. No -f: we want to read the
+          # body of an error response, not have curl abort on it.
+          BODY=$(curl -sS --max-time 20 -w '\n%{http_code}' "$HEALTH_URL") || {
+            echo "request failed outright (DNS, TLS, or timeout)"
+            exit 1
+          }
+          STATUS=$(printf '%s' "$BODY" | tail -n1)
+          PAYLOAD=$(printf '%s' "$BODY" | sed '$d')
+          echo "status=$STATUS"
+          echo "payload=$PAYLOAD"
+          if [ "$STATUS" != "200" ]; then
+            echo "expected 200, got $STATUS"
+            exit 1
+          fi
+          case "$PAYLOAD" in
+            *'"ok":true'*) echo "healthy" ;;
+            *) echo "200 but body is not ok:true"; exit 1 ;;
+          esac
+
+      - name: Alert on failure
+        if: failure() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        run: |
+          MSG="⚠ Uptime check failed: $HEALTH_URL
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # jq builds the JSON so a message with quotes or newlines can't produce
+          # a malformed body. Trailing `|| true`: a failed alert must not mask
+          # the probe failure that triggered it.
+          jq -n --arg chat_id "$TELEGRAM_CHAT_ID" --arg text "$MSG" \
+            '{chat_id: $chat_id, text: $text, disable_web_page_preview: true}' \
+            | curl -fsSL -X POST -H 'content-type: application/json' --data @- \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" || true

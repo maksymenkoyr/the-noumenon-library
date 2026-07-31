@@ -166,10 +166,17 @@ export const config = {
   // Per-model price (USD per million tokens) for the spend counter — see
   // DEFAULT_MODEL_PRICES above for the interim-pricing rationale and TODO.
   modelPrices: parseModelPrices("MODEL_PRICES", DEFAULT_MODEL_PRICES),
-  // Optional alert webhook (Discord/Slack-compatible) for monitor() events —
-  // generation/moderation/DB failures (docs/reference/architecture.md §9, Phase 7). Unset
-  // → structured JSON logs only, no push. Never let alerting break a request.
-  monitorWebhookUrl: process.env.MONITOR_WEBHOOK_URL ?? "",
+  // Optional Telegram bot for monitor() alerts — generation/moderation/DB
+  // failures (docs/reference/architecture.md §9, Phase 7). Both unset → structured
+  // JSON logs only, no push. Never let alerting break a request. Accessors (not
+  // plain values) so tests can stub the env after import, as with the Resend
+  // keys below.
+  get telegramBotToken() {
+    return process.env.TELEGRAM_BOT_TOKEN ?? "";
+  },
+  get telegramChatId() {
+    return process.env.TELEGRAM_CHAT_ID ?? "";
+  },
   // Contact address for abuse/copyright reports, shown on /about and beside the
   // on-page report control (docs/reference/legal.md, Phase 9) as the manual channel.
   // Unset → the about page says reporting is temporarily offline.

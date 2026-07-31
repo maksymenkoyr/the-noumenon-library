@@ -32,9 +32,11 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Gate everything except the redemption route, robots.txt, and static
-  // assets — robots.txt must stay readable even while a deploy is gated.
+  // Gate everything except the redemption route, the health probe, robots.txt,
+  // and static assets — robots.txt must stay readable even while a deploy is
+  // gated, and api/health must answer an external uptime monitor that has no
+  // invite cookie (it reveals only up/down, never content: app/api/health).
   matcher: [
-    "/((?!api/access|robots\\.txt|_next/static|_next/image|favicon\\.ico).*)",
+    "/((?!api/access|api/health|robots\\.txt|_next/static|_next/image|favicon\\.ico).*)",
   ],
 };

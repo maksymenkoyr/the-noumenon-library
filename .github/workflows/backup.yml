@@ -6,7 +6,7 @@ name: Nightly backup
 #
 # Requires repository secrets: DATABASE_URL_UNPOOLED, R2_ACCOUNT_ID,
 # R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, and optionally
-# MONITOR_WEBHOOK_URL (to be pinged if the job fails).
+# TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (to be pinged if the job fails).
 
 on:
   schedule:
@@ -34,7 +34,8 @@ jobs:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
-      MONITOR_WEBHOOK_URL: ${{ secrets.MONITOR_WEBHOOK_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       TARGET_DATABASE_URL: postgres://postgres:postgres@localhost:5432/verify
     steps:
       - uses: actions/checkout@v4
@@ -54,8 +55,14 @@ jobs:
       - name: Test-restore + verify
         run: npm run restore:verify -- "${{ steps.backup.outputs.dumpfile }}" "${{ steps.backup.outputs.pages }}"
       - name: Alert on failure
-        if: failure() && env.MONITOR_WEBHOOK_URL != ''
+        if: failure() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
         run: |
-          MSG="⚠ Nightly backup failed: ${{ github.repository }} run ${{ github.run_id }}"
-          curl -fsSL -X POST -H 'content-type: application/json' \
-            -d "{\"content\":\"$MSG\",\"text\":\"$MSG\"}" "$MONITOR_WEBHOOK_URL" || true
+          MSG="⚠ Nightly backup failed: ${{ github.repository }} run ${{ github.run_id }}
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # jq builds the JSON so a message with quotes or newlines can't produce
+          # a malformed body. Trailing `|| true`: a failed alert must not mask
+          # the backup failure that triggered it.
+          jq -n --arg chat_id "$TELEGRAM_CHAT_ID" --arg text "$MSG" \
+            '{chat_id: $chat_id, text: $text, disable_web_page_preview: true}' \
+            | curl -fsSL -X POST -H 'content-type: application/json' --data @- \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" || true
