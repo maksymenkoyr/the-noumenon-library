@@ -58,10 +58,12 @@ export async function recordReport(
   const prior = await query<{ count: string }>(
     "SELECT count(*) AS count FROM page_reports WHERE address = $1 AND status = 'open'",
     [address],
+    "reports.recordReport.priorOpen",
   );
   const rows = await query<{ id: string }>(
     "INSERT INTO page_reports (address, reason) VALUES ($1, $2) RETURNING id",
     [address, trimmed || null],
+    "reports.recordReport.insert",
   );
   // Two statements, not one atomic check: a same-instant duplicate report can
   // at worst cost one extra email, which the fail-open channel tolerates.
@@ -76,6 +78,8 @@ export async function listOpenReports(): Promise<PageReport[]> {
   const rows = await query<ReportRow>(
     `SELECT id, address, reason, status, created_at, resolved_at
      FROM page_reports WHERE status = 'open' ORDER BY created_at, id`,
+    [],
+    "reports.listOpenReports",
   );
   return rows.map(toReport);
 }
@@ -89,6 +93,7 @@ export async function resolveReport(id: number): Promise<boolean> {
     `UPDATE page_reports SET status = 'resolved', resolved_at = now()
      WHERE id = $1 AND status = 'open' RETURNING id`,
     [id],
+    "reports.resolveReport",
   );
   return rows.length > 0;
 }

@@ -64,6 +64,7 @@ export async function getPageSignals(limit = 100): Promise<PageSignal[]> {
      ORDER BY visits DESC, address
      LIMIT $1`,
     [limit],
+    "insights.getPageSignals",
   );
   return rows.map(toPageSignal);
 }
@@ -107,6 +108,8 @@ export async function getModelSignals(): Promise<ModelSignal[]> {
     `SELECT model, pages, likes, dislikes, open_reports, visits, avg_median_dwell_ms
      FROM model_signals
      ORDER BY visits DESC`,
+    [],
+    "insights.getModelSignals",
   );
   return rows.map(toModelSignal);
 }
@@ -150,6 +153,8 @@ export async function getVariantSignals(): Promise<VariantSignal[]> {
     `SELECT prompt_variant, pages, likes, dislikes, open_reports, visits, avg_median_dwell_ms
      FROM variant_signals
      ORDER BY visits DESC`,
+    [],
+    "insights.getVariantSignals",
   );
   return rows.map(toVariantSignal);
 }
@@ -183,6 +188,8 @@ export async function getArrivalSignals(): Promise<ArrivalSignal[]> {
     `SELECT arrived_via, visits, avg_dwell_ms, median_dwell_ms
      FROM arrival_signals
      ORDER BY visits DESC`,
+    [],
+    "insights.getArrivalSignals",
   );
   return rows.map(toArrivalSignal);
 }

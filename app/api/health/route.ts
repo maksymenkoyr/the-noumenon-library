@@ -24,7 +24,7 @@ export async function GET() {
   // stops any intermediary from serving a stale verdict.
   const headers = { "cache-control": "no-store" };
   try {
-    await query("select 1");
+    await query("select 1", [], "health.GET");
     return NextResponse.json({ ok: true, db: "ok" }, { headers });
   } catch {
     return NextResponse.json(

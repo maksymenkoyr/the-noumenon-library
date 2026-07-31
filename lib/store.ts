@@ -68,6 +68,7 @@ export async function contentExistsElsewhere(
   const rows = await query(
     "SELECT 1 FROM pages WHERE content_hash = $1 AND address <> $2 LIMIT 1",
     [contentHash, address],
+    "store.contentExistsElsewhere",
   );
   return rows.length > 0;
 }
@@ -76,6 +77,7 @@ export async function getPage(address: string): Promise<PageRow | null> {
   const rows = await query<PageRow>(
     "SELECT * FROM pages WHERE address = $1",
     [address],
+    "store.getPage",
   );
   return rows[0] ?? null;
 }
@@ -91,6 +93,7 @@ export async function reservePage(address: string): Promise<boolean> {
      ON CONFLICT (address) DO NOTHING
      RETURNING address`,
     [address],
+    "store.reservePage",
   );
   return rows.length > 0;
 }
@@ -111,6 +114,7 @@ export async function reclaimStaleReservation(
        AND created_at < now() - make_interval(secs => $2)
      RETURNING address`,
     [address, config.staleReservationSeconds],
+    "store.reclaimStaleReservation",
   );
   return rows.length > 0;
 }
@@ -152,6 +156,7 @@ export async function commitPage(
       inputs.temperature ?? null,
       JSON.stringify(inputs),
     ],
+    "store.commitPage",
   );
   return rows.length > 0;
 }
@@ -171,6 +176,7 @@ export async function takeDownPage(address: string): Promise<void> {
        content_hash = NULL,
        committed_at = now()`,
     [address],
+    "store.takeDownPage",
   );
 }
 
@@ -183,6 +189,7 @@ export async function releaseReservation(address: string): Promise<void> {
   await query(
     "DELETE FROM pages WHERE address = $1 AND status = 'generating'",
     [address],
+    "store.releaseReservation",
   );
 }
 
