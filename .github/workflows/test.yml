@@ -26,7 +26,12 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_PASSWORD: postgres
+          # No password on purpose. This container is reachable only from this
+          # job's own runner for the ~60s it exists, so a password protects
+          # nothing — and a hardcoded one trips secret scanners (GitGuardian
+          # flagged the earlier `POSTGRES_PASSWORD: postgres` as a Generic
+          # Password). `trust` removes the credential instead of laundering it.
+          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: noumenon_test
         ports: ["5432:5432"]
         options: >-
@@ -36,7 +41,7 @@ jobs:
       # The tests read TEST_DATABASE_URL and assign it to DATABASE_URL
       # themselves; they fall back to a bare localhost URL that would only work
       # by accident here, so set it explicitly.
-      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/noumenon_test
+      TEST_DATABASE_URL: postgres://postgres@localhost:5432/noumenon_test
       # Do NOT add provider keys here. The suites set their own dummy
       # OPENROUTER_API_KEY and mock getClient(), and lib/registry.test.ts
       # asserts the "provider with no key is filtered out" path by relying on
