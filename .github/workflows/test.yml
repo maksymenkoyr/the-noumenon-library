@@ -27,10 +27,10 @@ jobs:
         image: postgres:17
         env:
           # No password on purpose. This container is reachable only from this
-          # job's own runner for the ~60s it exists, so a password protects
-          # nothing — and a hardcoded one trips secret scanners (GitGuardian
-          # flagged the earlier `POSTGRES_PASSWORD: postgres` as a Generic
-          # Password). `trust` removes the credential instead of laundering it.
+          # job's own runner for the ~60s it exists, so a credential here
+          # protects nothing, and hardcoding one trips secret scanners for no
+          # security gain. Trust auth removes it rather than laundering it, and
+          # TEST_DATABASE_URL below loses its user:pass@ form with it.
           POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: noumenon_test
         ports: ["5432:5432"]
