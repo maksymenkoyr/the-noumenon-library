@@ -48,6 +48,20 @@ type PromptBuilder = (ctx: PromptContext) => string;
  * than hardcoded into the builder, so the pool stays the single source of
  * every appended sentence.
  *
+ * Everything below `self-reference` is an **entropy dial**: a low-probability
+ * proscription that closes off one habitual move, so the model has to reach
+ * somewhere it would not otherwise go. They are deliberately *negative*. The
+ * removed GENERATION_FORMS lever (commit 6d613cc) prescribed a register
+ * ("reads like a prayer") and produced pastiche — the model writes *toward* a
+ * label. Forbidding names no destination, so it widens the output distribution
+ * instead of relocating it. Both surviving pre-existing constraints are
+ * negative for the same reason; keep new dials that way.
+ *
+ * Each is independent, so they stack combinatorially — that pressure is the
+ * point (two firing together lands on ~14% of pages, three on ~2%), but it is
+ * also why they sit at 0.15 rather than the 0.75 of the two corrective
+ * constraints above. Those two fix a known failure; these only widen the range.
+ *
  * The chosen ids are logged in provenance (`prompt_variant` suffix, e.g.
  * `base-v1+no-library`) so wander reports can attribute each constraint's
  * effect.
@@ -72,6 +86,39 @@ export const GENERATION_CONSTRAINTS: readonly PromptConstraint[] = [
       "This particular page does not speak of itself as a page, give itself " +
       "a page number, or address whoever is reading it.",
     probability: 0.75,
+  },
+  {
+    id: "no-persons",
+    text:
+      "This particular page has no human being anywhere in it — no one acts " +
+      "on it and no one is described.",
+    probability: 0.15,
+  },
+  {
+    id: "no-speech",
+    text:
+      "This particular page carries no speech: nothing on it is said aloud, " +
+      "quoted, or set as dialogue.",
+    probability: 0.15,
+  },
+  {
+    id: "no-sequence",
+    text:
+      "This particular page does not narrate — nothing on it happens in " +
+      "sequence, one event after another.",
+    probability: 0.15,
+  },
+  {
+    id: "no-abstraction",
+    text:
+      "This particular page names only what could be touched or counted, " +
+      "holding throughout to concrete particulars.",
+    probability: 0.15,
+  },
+  {
+    id: "no-past",
+    text: "This particular page describes nothing as having already happened.",
+    probability: 0.15,
   },
 ];
 

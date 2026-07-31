@@ -69,3 +69,42 @@ describe("buildPrompt", () => {
     expect(() => buildPrompt("does-not-exist", ctx)).toThrow(/unknown prompt variant/i);
   });
 });
+
+describe("entropy dials", () => {
+  const DIAL_IDS = [
+    "no-persons",
+    "no-speech",
+    "no-sequence",
+    "no-abstraction",
+    "no-past",
+  ];
+
+  it("carries every dial in the pool", () => {
+    const ids = GENERATION_CONSTRAINTS.map((c) => c.id);
+    for (const id of DIAL_IDS) expect(ids).toContain(id);
+  });
+
+  it("keeps the dials rare enough that the base texture survives", () => {
+    for (const id of DIAL_IDS) {
+      const dial = GENERATION_CONSTRAINTS.find((c) => c.id === id);
+      // Dials only widen the range, so they sit far below the two corrective
+      // constraints (0.75) that fix a known failure mode. They stack
+      // independently; at 0.15 that means ~14% of pages get two, ~2% three.
+      expect(dial?.probability).toBeLessThanOrEqual(0.25);
+    }
+  });
+
+  it("proscribes rather than prescribes a register", () => {
+    // The removed GENERATION_FORMS lever (commit 6d613cc) named a destination
+    // ("reads like a prayer") and produced pastiche. Nothing in the pool may
+    // tell the page what to be — only what it happens not to contain.
+    for (const { text } of GENERATION_CONSTRAINTS) {
+      expect(text).not.toMatch(/reads like|in the style of|written as an? /i);
+    }
+  });
+
+  it("keeps ids unique — they ride into prompt_variant as provenance", () => {
+    const ids = GENERATION_CONSTRAINTS.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
