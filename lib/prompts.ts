@@ -21,11 +21,18 @@
  */
 
 export interface PromptContext {
+  // Drawn per page from the address-seeded stream (lib/generate.ts), not a
+  // constant — see the length note on the builder below.
   maxWords: number;
   // Sampled constraint sentences (GENERATION_CONSTRAINTS), appended to the
   // prompt in order. Facts about the found page, never orders to a writer —
   // the transcriber framing holds. Empty when nothing fired.
   constraints?: readonly string[];
+  // One association term drawn from the page's *gallery* (lib/gallerySeeds.ts),
+  // stable across every page of a volume. Undefined when the gallery has no
+  // stored terms yet or the association call failed — the prompt then reads
+  // exactly as it did before this lever existed.
+  seedTerm?: string;
 }
 
 type PromptBuilder = (ctx: PromptContext) => string;
@@ -122,17 +129,36 @@ export const GENERATION_CONSTRAINTS: readonly PromptConstraint[] = [
   },
 ];
 
+/**
+ * The length/shape clause used to end "...and it must read as a finished whole
+ * — never cut off mid-thought." That clause cancelled the fragment permission
+ * standing beside it: measured across every page stored at the time, the
+ * collection ran 320–417 words with a 367 mean and *no* fragments at all, so
+ * the stated range was fiction. Two causes, both fixed here — `maxWords` was a
+ * constant (it is now drawn per page, lib/generate.ts), and "finished whole"
+ * forced every page into the shape of a complete little essay.
+ *
+ * A page of a real book is a slice: it begins and ends wherever the previous
+ * and next pages leave off. Saying so makes partialness *diegetic* rather than
+ * a truncated-looking generation — the distinction matters, since an empty or
+ * clipped completion is a genuine failure mode that lib/generate.ts retries.
+ */
 const VARIANTS: Record<string, PromptBuilder> = {
-  "base-v1": ({ maxWords, constraints = [] }) =>
+  "base-v1": ({ maxWords, constraints = [], seedTerm }) =>
     [
       "An endless library holds every text that could ever be written. You are " +
         "reading one page from it; set down exactly what is on it. You do not " +
         "know what it is or where it sits.",
       "",
       [
-        "The text may be a brief fragment or fill the page, but no more than " +
-          `about ${maxWords} words, and it must read as a finished whole — ` +
-          "never cut off mid-thought.",
+        "What is on it may be a few lines or fill the page, up to about " +
+          `${maxWords} words. A page is a slice: it may begin or end ` +
+          "mid-sentence, and needs no beginning or ending of its own.",
+        // The gallery's association term. Deliberately loose ("something ...
+        // has to do with"): a bare noun stated as the subject turns the page
+        // into an encyclopedia entry about it. Sits before the constraints so
+        // the negative facts read as refinements of it.
+        ...(seedTerm ? [`Something on this page has to do with ${seedTerm}.`] : []),
         ...constraints,
       ].join(" "),
     ].join("\n"),

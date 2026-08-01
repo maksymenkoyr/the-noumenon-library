@@ -16,6 +16,7 @@ import {
   reasoningParams,
   type Provider,
 } from "./providers";
+import { pickTerm, termsForGallery } from "./gallerySeeds";
 import {
   buildPrompt,
   DEFAULT_PROMPT_VARIANT,
@@ -23,7 +24,7 @@ import {
   type PromptConstraint,
 } from "./prompts";
 import { chooseGenerationModel, markCooling, markHealthy, markUnavailable, poolFor } from "./registry";
-import { attemptSeed, makeSeededRandom } from "./seededRandom";
+import { attemptSeed, makeSeededRandom, volumeSeed } from "./seededRandom";
 
 /**
  * Generation is a pure function of its levers plus model nondeterminism, and
@@ -42,10 +43,18 @@ export interface GenerationLevers {
   provider: Provider;
   temperature: number; // jittered around the chosen row's base temperature
   maxTokens: number; // the chosen row's max_tokens
+  // Word budget stated in the prompt, drawn per page from
+  // [config.pageMinWords, config.pageMaxWords]. Not the same thing as
+  // maxTokens: that is the hard provider cap, this is the shape we ask for.
+  maxWords: number;
   promptVariant: string;
   // Dynamic constraints sampled for this page. Their ids ride into
   // provenance via provenanceVariant().
   constraints: readonly PromptConstraint[];
+  // The gallery association term this volume is built around
+  // (lib/gallerySeeds.ts), or undefined when the gallery has no stored terms.
+  // Persisted as pages.seed_word.
+  seedTerm?: string;
 }
 
 /** Fisher-Yates shuffle; does not mutate the input. */
@@ -71,6 +80,19 @@ function jitteredTemperature(base: number, rng: () => number): number {
 /** Each pool constraint applies independently, by its own probability. */
 function sampleConstraints(rng: () => number): PromptConstraint[] {
   return GENERATION_CONSTRAINTS.filter((c) => rng() < c.probability);
+}
+
+/**
+ * A per-page word budget, uniform over the configured range. Length was the
+ * one entropy axis with no variance at all — a fixed 400 in the prompt put
+ * every stored page between 320 and 417 words — and it costs nothing to vary,
+ * since the prompt already took the number as a parameter. A 70-word page
+ * beside a 400-word one changes how a wander feels more than any wording does.
+ */
+function jitteredMaxWords(rng: () => number): number {
+  const { pageMinWords, pageMaxWords } = config;
+  if (pageMaxWords <= pageMinWords) return pageMaxWords;
+  return Math.round(pageMinWords + rng() * (pageMaxWords - pageMinWords));
 }
 
 /**
@@ -107,14 +129,22 @@ export async function chooseLevers(
   const stats = await getModelStats();
   const chosen = await chooseGenerationModel(stats, rng);
   const promptVariant = DEFAULT_PROMPT_VARIANT;
-  // Fixed draw order (model above, then constraints, then temperature) so a
-  // given seed always maps to the same page.
+  // Fixed draw order (model above, then constraints, temperature, length) so a
+  // given seed always maps to the same page. Append new draws at the END —
+  // inserting one mid-sequence reshuffles every lever after it.
   const constraints = sampleConstraints(rng);
   const temperature = jitteredTemperature(chosen.temperature, rng);
+  const maxWords = jitteredMaxWords(rng);
+  // Drawn from a separate, volume-scoped stream (lib/seededRandom.ts
+  // volumeSeed) rather than the page stream above: the subject must hold
+  // across all 410 pages of a volume, and must survive a retry's redraw.
+  const terms = await termsForGallery(address.split("/")[0]);
+  const seedTerm = pickTerm(terms, makeSeededRandom(volumeSeed(address)));
   devLog(
     `generate address=${address} attempt=${attempt} model=${chosen.slug} ` +
       `provider=${chosen.provider} temp=${temperature.toFixed(2)} ` +
-      `variant=${promptVariant}` +
+      `maxWords=${maxWords} variant=${promptVariant}` +
+      (seedTerm ? ` seed=${seedTerm}` : "") +
       (constraints.length
         ? ` constraints=${constraints.map((c) => c.id).join(",")}`
         : ""),
@@ -124,8 +154,10 @@ export async function chooseLevers(
     provider: chosen.provider,
     temperature,
     maxTokens: chosen.maxTokens,
+    maxWords,
     promptVariant,
     constraints,
+    seedTerm,
   };
 }
 
@@ -207,8 +239,9 @@ export async function generatePage(
 ): Promise<GenerationResult> {
   const constraintTexts = levers.constraints.map((c) => c.text);
   const prompt = buildPrompt(levers.promptVariant, {
-    maxWords: config.pageMaxWords,
+    maxWords: levers.maxWords,
     constraints: constraintTexts,
+    seedTerm: levers.seedTerm,
   });
   // Full-prompt dev logging (docs/reference/generation.md): chooseLevers()
   // above already logs the levers; this logs the exact string sent as the

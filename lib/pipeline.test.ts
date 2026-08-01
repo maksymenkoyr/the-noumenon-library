@@ -21,6 +21,15 @@ vi.mock("./moderate", () => ({
 // Mock monitoring so we can assert which structured events the pipeline emits
 // without writing JSON to the test output.
 vi.mock("./monitor", () => ({ monitor: vi.fn() }));
+// chooseLevers() is real here, and it asks the gallery for its association
+// terms — a network call. Stub it to "no terms", which is the fail-open path
+// the pipeline already has to handle; the lever itself is covered in
+// lib/gallerySeeds.test.ts.
+vi.mock("./gallerySeeds", async () => {
+  const actual =
+    await vi.importActual<typeof import("./gallerySeeds")>("./gallerySeeds");
+  return { ...actual, termsForGallery: vi.fn(async () => []) };
+});
 
 import { closePool, query } from "./db";
 import { generatePage } from "./generate";

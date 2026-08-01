@@ -129,6 +129,8 @@ async function PageBody({
         prompt={resolved.prompt}
         promptVariant={resolved.promptVariant}
         temperature={resolved.temperature}
+        seedWord={resolved.seedWord}
+        maxWords={resolved.maxWords}
       />
     );
   }
@@ -155,6 +157,8 @@ async function CommittedPage({
   prompt,
   promptVariant,
   temperature,
+  seedWord,
+  maxWords,
 }: {
   address: string;
   text: string;
@@ -170,6 +174,8 @@ async function CommittedPage({
   prompt?: string;
   promptVariant?: string;
   temperature?: number;
+  seedWord?: string;
+  maxWords?: number;
 }) {
   const likeCount = await getLikeCount(address);
   return (
@@ -184,6 +190,8 @@ async function CommittedPage({
           prompt={prompt}
           promptVariant={promptVariant}
           temperature={temperature}
+          seedWord={seedWord}
+          maxWords={maxWords}
         />
       )}
       <Marks address={address} initialCount={likeCount} />

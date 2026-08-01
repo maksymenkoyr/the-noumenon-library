@@ -44,6 +44,14 @@ export interface PageInputs {
   promptVariant?: string;
   // Applied constraint ids (unsuffixed), for structured querying.
   constraints?: string[];
+  // The gallery association term this volume was built around
+  // (lib/gallerySeeds.ts). Projected to the pages.seed_word column rather than
+  // suffixed onto promptVariant: term cardinality is unbounded, and suffixing
+  // would shatter the variant_signals view into one bucket per term.
+  seedWord?: string;
+  // Word budget asked for in the prompt, drawn per page. Kept so a page's
+  // length can be read against what was requested.
+  maxWords?: number;
   // The exact prompt sent for whichever attempt ended up committed.
   prompt?: string;
   // The chain link that passed the committed content (lib/moderate.ts).
@@ -139,7 +147,8 @@ export async function commitPage(
        model = $4,
        prompt_variant = $5,
        temperature = $6,
-       inputs = $7::jsonb,
+       seed_word = $7,
+       inputs = $8::jsonb,
        committed_at = now()
      WHERE address = $1 AND status = 'generating'
      RETURNING address`,
@@ -150,6 +159,7 @@ export async function commitPage(
       inputs.model,
       inputs.promptVariant ?? null,
       inputs.temperature ?? null,
+      inputs.seedWord ?? null,
       JSON.stringify(inputs),
     ],
   );

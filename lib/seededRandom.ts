@@ -37,3 +37,21 @@ export function makeSeededRandom(seed: string): () => number {
 export function attemptSeed(address: string, attempt: number): string {
   return attempt === 0 ? address : `${address}#${attempt}`;
 }
+
+/**
+ * The seed for draws that must hold steady across a whole volume: the
+ * canonical address (lib/address.ts formatAddress, `gallery/wall/shelf/volume/
+ * page`) with the page segment removed.
+ *
+ * Used for the gallery association term (lib/gallerySeeds.ts), so all 410
+ * pages of one volume share a subject while neighbouring volumes diverge — a
+ * shelf of books rather than 410 unrelated sheets. Deliberately a *separate*
+ * stream from attemptSeed's: drawing the term from the page-seeded sequence
+ * would make it vary page to page, which is exactly what this prevents. It
+ * also means a moderation/dedup retry redraws every other lever but keeps the
+ * volume's subject, which is the intended behaviour.
+ */
+export function volumeSeed(address: string): string {
+  const lastSlash = address.lastIndexOf("/");
+  return lastSlash === -1 ? address : address.slice(0, lastSlash);
+}

@@ -132,6 +132,14 @@ export const config = {
   // Page-size constraint (docs/reference/generation.md), stated in the
   // prompt. The per-call token cap for generation/moderation comes from the
   // chosen model_registry row's max_tokens (lib/registry.ts).
+  //
+  // These are the ends of a *range*, not a fixed size: each page draws its own
+  // word budget uniformly from [pageMinWords, pageMaxWords] on the
+  // address-seeded stream (lib/generate.ts). Length was the one entropy axis
+  // sitting at zero variance — every stored page landed 320–417 words, mean
+  // 367 — because this was a single constant. Set both to the same value to
+  // pin length again.
+  pageMinWords: numeric("PAGE_MIN_WORDS", 60),
   pageMaxWords: numeric("PAGE_MAX_WORDS", 400),
   // Concurrency guard tunables (docs/reference/architecture.md §3). The stale window
   // must comfortably exceed worst-case generation time. Lowered 300 → 90 now

@@ -10,8 +10,11 @@ CREATE TABLE IF NOT EXISTS pages (
   model          TEXT,                    -- e.g. 'nvidia/nemotron-3-super-120b-a12b:free'
   prompt_variant TEXT,                    -- slug of the prompt template/version used
   temperature    REAL,                    -- entropy lever, provenance
-  seed_word      TEXT,                    -- deprecated/unused (book-mode form/axis
-                                           -- fingerprint, since removed); retained nullable
+  seed_word      TEXT,                    -- the gallery association term this page
+                                           -- was seeded with (lib/gallerySeeds.ts);
+                                           -- NULL when the gallery had no terms.
+                                           -- Reuses the column left nullable when
+                                           -- book mode was removed
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   committed_at   TIMESTAMPTZ              -- when status moved to ok/taken_down
 );
@@ -19,6 +22,24 @@ CREATE TABLE IF NOT EXISTS pages (
 -- Dedup lookup; content_hash is deliberately NOT unique (near-duplicates
 -- are allowed), we only check exact collisions before commit.
 CREATE INDEX IF NOT EXISTS pages_content_hash_idx ON pages (content_hash);
+
+-- One association expansion per gallery token, minted on the first generation
+-- in that gallery and then permanent (lib/gallerySeeds.ts). Each volume draws
+-- one term from `terms` to seed its subject, so `bmw89` grows a semantic
+-- neighbourhood: a few volumes plainly about BMW, most connected only
+-- sideways. Same lifecycle as a page — generate once, store forever, keyed by
+-- a coordinate — which is what keeps generation reproducible: the terms are
+-- committed before any page can use them.
+--
+-- One row amortizes over a gallery's 4 x 5 x 32 x 410 = 262,400 pages, so the
+-- call is free in practice. Deleting a row is the whole remediation story for
+-- a bad expansion; the next visit mints a fresh one.
+CREATE TABLE IF NOT EXISTS gallery_seeds (
+  gallery    TEXT PRIMARY KEY,        -- normalized gallery token (§5)
+  terms      JSONB NOT NULL,          -- string[]; [] is never stored (fail open)
+  model      TEXT,                    -- which model produced the expansion
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- Deprecated/unused: the books experiment (volume = book, BOOK_MODE) was
 -- removed from the app. Table left in place (non-destructive) rather than

@@ -14,6 +14,16 @@ vi.mock("./providers", async () => {
   return { ...actual, getClient: () => ({ chat: { completions: { create: createMock } } }) };
 });
 
+// chooseLevers asks the gallery for its association terms. Stub the network
+// call and control the term list, so the seed lever can be asserted here
+// without a provider (its own behavior lives in lib/gallerySeeds.test.ts).
+const SEED_TERMS = ["bavaria", "roundel", "welding", "sediment", "oak bark"];
+vi.mock("./gallerySeeds", async () => {
+  const actual =
+    await vi.importActual<typeof import("./gallerySeeds")>("./gallerySeeds");
+  return { ...actual, termsForGallery: vi.fn(async () => SEED_TERMS) };
+});
+
 import { config } from "./config";
 import { closePool, query } from "./db";
 import {
@@ -35,6 +45,7 @@ const levers: GenerationLevers = {
   provider: "openrouter",
   temperature: 0.9,
   maxTokens: 1000,
+  maxWords: 400,
   promptVariant: "base-v1",
   constraints: [],
 };
@@ -266,5 +277,53 @@ describe("chooseLevers", () => {
     const expected = "base-v1" + one.constraints.map((c) => `+${c.id}`).join("");
     expect(provenanceVariant(one)).toBe(expected);
     expect(GENERATION_CONSTRAINTS.length).toBeGreaterThan(0);
+  });
+
+  it("draws a per-page word budget inside the configured range", async () => {
+    const seen = new Set<number>();
+    for (let i = 0; i < 50; i++) {
+      const drawn = (await chooseLevers(`g/1/1/1/${i + 1}`)).maxWords;
+      expect(drawn).toBeGreaterThanOrEqual(config.pageMinWords);
+      expect(drawn).toBeLessThanOrEqual(config.pageMaxWords);
+      seen.add(drawn);
+    }
+    // Length was the one lever with zero variance — a fixed 400 put every
+    // stored page between 320 and 417 words.
+    expect(seen.size).toBeGreaterThan(20);
+  });
+
+  it("keeps the word budget reproducible from the address", async () => {
+    const a = await chooseLevers("gallery/1/2/3/4");
+    const b = await chooseLevers("gallery/1/2/3/4");
+    expect(b.maxWords).toBe(a.maxWords);
+  });
+
+  it("gives every page of a volume the same seed term", async () => {
+    const first = await chooseLevers("bmw89/3/2/17/1");
+    const middle = await chooseLevers("bmw89/3/2/17/206");
+    const last = await chooseLevers("bmw89/3/2/17/410");
+    expect(SEED_TERMS).toContain(first.seedTerm);
+    expect(middle.seedTerm).toBe(first.seedTerm);
+    expect(last.seedTerm).toBe(first.seedTerm);
+    // ...while the page-seeded levers still vary across those same pages.
+    expect(middle.maxWords).not.toBe(first.maxWords);
+  });
+
+  it("keeps the volume's seed term across a regeneration attempt", async () => {
+    // A moderation/dedup retry redraws every page-seeded lever, but the book
+    // it belongs to must not change subject mid-volume.
+    const first = await chooseLevers("bmw89/3/2/17/1", 0);
+    const retry = await chooseLevers("bmw89/3/2/17/1", 1);
+    expect(retry.seedTerm).toBe(first.seedTerm);
+    expect(retry.maxWords).not.toBe(first.maxWords);
+  });
+
+  it("puts the seed term in the prompt but never the address", async () => {
+    const chosen = await chooseLevers("bmw89/3/2/17/1");
+    createMock.mockResolvedValueOnce(completion("page text"));
+    const result = await generatePage(chosen);
+    expect(result.prompt).toContain(`has to do with ${chosen.seedTerm}`);
+    expect(result.prompt).not.toContain("bmw89");
+    expect(result.prompt).not.toMatch(/\b[a-z0-9-]+\/\d+\/\d+\/\d+\/\d+\b/);
   });
 });

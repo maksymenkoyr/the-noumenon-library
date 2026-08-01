@@ -23,6 +23,8 @@ export function DevBadge({
   prompt,
   promptVariant,
   temperature,
+  seedWord,
+  maxWords,
 }: {
   model?: string | null;
   generationMs?: number;
@@ -31,6 +33,8 @@ export function DevBadge({
   prompt?: string;
   promptVariant?: string;
   temperature?: number;
+  seedWord?: string;
+  maxWords?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   if (!model && generationMs == null && moderationMs == null) return null;
@@ -67,6 +71,18 @@ export function DevBadge({
               <>
                 <dt>temp</dt>
                 <dd>{temperature.toFixed(2)}</dd>
+              </>
+            )}
+            {seedWord && (
+              <>
+                <dt>seed</dt>
+                <dd>{seedWord}</dd>
+              </>
+            )}
+            {maxWords != null && (
+              <>
+                <dt>words</dt>
+                <dd>≤ {maxWords}</dd>
               </>
             )}
           </dl>

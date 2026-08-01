@@ -35,10 +35,12 @@ describe("buildPrompt", () => {
     const constraints = GENERATION_CONSTRAINTS.map((c) => c.text);
     const withConstraints = buildPrompt(DEFAULT_PROMPT_VARIANT, { ...ctx, constraints });
     for (const text of constraints) expect(withConstraints).toContain(text);
-    // Constraints follow the size clause inside the same paragraph.
-    expect(withConstraints.indexOf(constraints[0])).toBeGreaterThan(
-      withConstraints.indexOf("finished whole"),
-    );
+    // Constraints follow the size clause inside the same paragraph. Anchor on
+    // text that actually exists — a missing anchor makes indexOf return -1 and
+    // the comparison passes vacuously.
+    const sizeClause = withConstraints.indexOf("up to about");
+    expect(sizeClause).toBeGreaterThan(-1);
+    expect(withConstraints.indexOf(constraints[0])).toBeGreaterThan(sizeClause);
 
     const without = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
     for (const text of constraints) expect(without).not.toContain(text);
@@ -67,6 +69,54 @@ describe("buildPrompt", () => {
 
   it("throws on an unknown variant", () => {
     expect(() => buildPrompt("does-not-exist", ctx)).toThrow(/unknown prompt variant/i);
+  });
+});
+
+describe("page shape", () => {
+  it("no longer demands a finished whole, and licenses a partial page", () => {
+    // The clause "must read as a finished whole — never cut off mid-thought"
+    // cancelled the fragment permission beside it: every stored page landed
+    // 320-417 words with no fragments at all. A page of a real book is a slice.
+    const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
+    expect(prompt).not.toMatch(/finished whole|never cut off/i);
+    expect(prompt).toMatch(/may begin or end\s+mid-sentence/);
+  });
+
+  it("states whatever word budget it is given, not a constant", () => {
+    // maxWords is drawn per page (lib/generate.ts jitteredMaxWords); the
+    // builder must not have 400 baked into it anywhere.
+    expect(buildPrompt(DEFAULT_PROMPT_VARIANT, { maxWords: 70 })).toContain("70");
+    expect(buildPrompt(DEFAULT_PROMPT_VARIANT, { maxWords: 70 })).not.toContain("400");
+  });
+});
+
+describe("gallery seed term", () => {
+  it("omits the slot entirely when the gallery has no terms", () => {
+    const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
+    expect(prompt).not.toMatch(/has to do with/i);
+    // No gap left where the omitted sentence would have been (the paragraph
+    // break is a newline, so this checks for a doubled space specifically).
+    expect(prompt).not.toMatch(/ {2,}/);
+  });
+
+  it("states the term loosely, as a fact about the page", () => {
+    const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, { ...ctx, seedTerm: "oak bark" });
+    expect(prompt).toContain("Something on this page has to do with oak bark.");
+    // Same rule as the constraints: a fact about the found page, never an
+    // order to a writer.
+    expect(prompt).not.toMatch(/do not write|avoid|you must/i);
+    // Loose on purpose — naming the term as *the subject* turns the page into
+    // an encyclopedia entry about it.
+    expect(prompt).not.toMatch(/the subject of this page|this page is about/i);
+  });
+
+  it("never lets the seed term smuggle the address into the prompt", () => {
+    // The hardest invariant: lever *selection* is address-seeded, but the
+    // prompt itself never carries a coordinate. The seed term is drawn from
+    // the gallery, so this is the one slot that could leak one.
+    const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, { ...ctx, seedTerm: "oak bark" });
+    expect(prompt).not.toMatch(/\b[a-z0-9-]+\/\d+\/\d+\/\d+\/\d+\b/);
+    expect(prompt).not.toMatch(/coordinate/i);
   });
 });
 

@@ -48,6 +48,10 @@ function inputsFrom(
     // Applied constraints ride as `+id` suffixes (e.g. `base-v1+no-library`).
     promptVariant: provenanceVariant(levers),
     constraints: levers.constraints.map((c) => c.id),
+    // Projected to the pages.seed_word column by commitPage, not onto
+    // promptVariant — see PageInputs.seedWord.
+    seedWord: levers.seedTerm,
+    maxWords: levers.maxWords,
     prompt,
     moderationModel,
     generationMs,
