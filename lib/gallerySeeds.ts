@@ -212,7 +212,12 @@ export async function termsForGallery(gallery: string): Promise<string[]> {
     // Re-read so a racing writer's row wins consistently for both callers.
     const committed = (await storedTerms(gallery)) ?? terms;
     lastFailure.delete(gallery);
-    devLog(`gallerySeeds ${gallery} → ${committed.length} terms via ${chosen.slug}`);
+    // Log the terms, not just the count: this fires once per gallery ever, and
+    // the list is the only thing that says whether the gallery is any good.
+    devLog(
+      `gallerySeeds ${gallery} → ${committed.length} terms via ${chosen.slug}\n` +
+        committed.join(" · "),
+    );
     return committed;
   } catch (error) {
     // Never surface as a page failure — log for visibility and carry on
