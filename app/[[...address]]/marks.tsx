@@ -25,23 +25,42 @@ migrateLegacyLikes();
 
 const dislikedKey = (address: string) => `noumenon:disliked:${address}`;
 
-// The nav breadcrumb for `arrived_via`, claimed (read-and-cleared) once per
-// page load at module scope: page navigation is a full page load, so this runs
-// exactly once per page, and an effect-scoped claim would be lost to
-// StrictMode's dev double-mount. On the server (SSR import) sessionStorage
-// throws → null. The claim then belongs to the FIRST page address mounted in
-// this page load — a later page reached client-side (e.g. via /liked and back)
-// must not inherit it.
-const claimedVia: string | null = (() => {
+const ARRIVED_KEY = "noumenon:arrived-via";
+
+/**
+ * The most recent breadcrumb claim, so a remount of the SAME address reuses it
+ * rather than re-reading an already-cleared key. This memo is what lets the
+ * claim live per-navigation instead of per-document: `next →` and the typed
+ * `go to` are client-side navigations (nav.tsx), so this module is evaluated
+ * once per document but must yield a fresh breadcrumb on every page.
+ *
+ * One slot, not a Map, and deliberately so: wandering A → B → A must re-read
+ * for the second A (the intervening B claim displaces it), while StrictMode's
+ * dev double-mount of a single address — which remounts immediately, with no
+ * intervening claim — reuses it. It also can't grow across a long session.
+ */
+let lastClaim: { address: string; via: string | null } | null = null;
+
+/**
+ * Read-and-clear the nav breadcrumb for this navigation, so each one is
+ * consumed exactly once. On the server (SSR import) sessionStorage throws →
+ * null, and a fresh tab (direct URL, shared link) finds no key → null, so both
+ * correctly report nothing. A page reached without a breadcrumb write (e.g.
+ * back from /liked) likewise inherits nothing, since the key was already
+ * cleared by whoever claimed it.
+ */
+function claimArrivedVia(address: string): string | null {
+  if (lastClaim?.address === address) return lastClaim.via;
+  let via: string | null = null;
   try {
-    const via = sessionStorage.getItem("noumenon:arrived-via");
-    sessionStorage.removeItem("noumenon:arrived-via");
-    return via;
+    via = sessionStorage.getItem(ARRIVED_KEY);
+    sessionStorage.removeItem(ARRIVED_KEY);
   } catch {
-    return null; // best-effort research signal
+    /* best-effort research signal */
   }
-})();
-let claimedForAddress: string | null = null;
+  lastClaim = { address, via };
+  return via;
+}
 
 function readMark(key: string): boolean {
   try {
@@ -137,8 +156,10 @@ export function Marks({
   // Reader timeline: record named, timestamped events and beacon the raw log
   // (not a computed total) so idle detection / dwell math can live server-side
   // (lib/engagement.ts recordEvents). The only identifier is `loadId`, minted
-  // fresh in memory on mount — never written to a cookie or any Storage API,
-  // so it dies with this page load and can't correlate across pages or visits.
+  // fresh in memory here — never written to a cookie or any Storage API. Keyed
+  // on `address`, so it is re-minted per page even when the surrounding
+  // document survives a client-side wander (nav.tsx): one page, one id, and
+  // no correlation across pages or visits.
   useEffect(() => {
     const IDLE_MS = 60_000; // no activity for this long while visible -> idle
     const ACTIVITY_THROTTLE_MS = 1000; // ignore activity bursts (pointermove...)
@@ -150,11 +171,9 @@ export function Marks({
     let idle = false;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let lastActivityAt = 0;
+    let left = false; // this load's closing event has been emitted (see `leave`)
 
-    // Bind the page-load breadcrumb to the first page mounted; comparing by
-    // address keeps it through StrictMode's dev remount of the same page.
-    if (claimedForAddress === null) claimedForAddress = address;
-    const arrivedVia = claimedForAddress === address ? claimedVia : null;
+    const arrivedVia = claimArrivedVia(address);
 
     const emit = (name: string, via?: string) => {
       const t = Math.round(performance.now());
@@ -211,11 +230,22 @@ export function Marks({
       } else {
         emit("visible");
         idle = false;
+        left = false; // restored from bfcache: we're reading again, so a later
+        // departure is a real second `leave`, not a duplicate.
         scheduleIdleTimer();
       }
     };
 
-    const onPageHide = () => {
+    /**
+     * The load's closing event. Reached two mutually exclusive ways: `pagehide`
+     * for a real departure (tab close, full page load — React cleanup does not
+     * run), and the effect cleanup for a client-side navigation (`pagehide`
+     * does not fire). The `left` guard makes it exactly once per departure
+     * whichever path gets there.
+     */
+    const leave = () => {
+      if (left) return;
+      left = true;
       emit("leave");
       flush();
     };
@@ -237,18 +267,19 @@ export function Marks({
       "touchstart",
     ] as const;
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pagehide", leave);
     for (const evt of activityEvents) {
       window.addEventListener(evt, onActivity, { passive: true });
     }
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pagehide", leave);
       for (const evt of activityEvents) {
         window.removeEventListener(evt, onActivity);
       }
       clearIdleTimer();
+      leave(); // client-side navigation away: `pagehide` never fires
     };
   }, [address]);
 

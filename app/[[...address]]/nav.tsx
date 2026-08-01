@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { formatAddress, normalizeAddress } from "@/lib/address";
 
 /**
@@ -12,9 +13,17 @@ import { formatAddress, normalizeAddress } from "@/lib/address";
  * `lib/address.ts` is a pure module (no node imports), so this client component
  * reuses the same `normalizeAddress` the server keys on to validate a typed
  * address inline before navigating — the server still normalizes as the source
- * of truth. We navigate with a full page load (plain anchors / location.assign)
- * rather than the router: `random` must re-resolve server-side on every click,
- * which client-side routing and Link prefetching would defeat.
+ * of truth.
+ *
+ * `random` alone navigates with a full page load: `/` is a server redirect to a
+ * fresh address (page.tsx), so it must re-resolve server-side on every click —
+ * which client-side routing and Link prefetching would defeat. `next →` and the
+ * typed `go to` have no such constraint; both resolve to a known address (a pure
+ * `nextAddress`, or a `normalizeAddress` validated right here), so they navigate
+ * client-side and the shell, fonts and layout stay mounted while only the page
+ * body swaps. marks.tsx is written to survive that — see the breadcrumb claim
+ * and the `leave` event there, both of which would otherwise assume one
+ * document load per page.
  */
 /**
  * Breadcrumb for the dwell beacon's `arrived_via` signal: written just before a
@@ -32,6 +41,7 @@ function breadcrumb(via: "random" | "next" | "typed"): void {
 }
 
 export function Nav({ nextHref }: { nextHref: string }) {
+  const router = useRouter();
   const [value, setValue] = useState("");
   const [error, setError] = useState(false);
 
@@ -44,7 +54,7 @@ export function Nav({ nextHref }: { nextHref: string }) {
       return;
     }
     breadcrumb("typed");
-    window.location.assign(`/${formatAddress(address)}`);
+    router.push(`/${formatAddress(address)}`);
   }
 
   return (
@@ -57,16 +67,28 @@ export function Nav({ nextHref }: { nextHref: string }) {
       >
         random
       </a>
-      <a
+      {/* prefetch={false} is load-bearing, not a micro-optimization: an
+          uncrystallized address is GENERATED on request (lib/resolvePage.ts),
+          so a speculative fetch would spend against the cap in lib/economics.ts
+          on a page nobody read. Next already skips prefetching dynamic routes
+          that have no loading.js — which is us — but that's a default, not a
+          guarantee: adding an app/loading.tsx would silently turn this link
+          into a generator. Pinned here so it can't.
+          onNavigate rather than onClick: the breadcrumb must only be written
+          when this tab actually navigates, or a Cmd+click (opens a new tab,
+          this one stays put) would leave a stale one behind for the next real
+          navigation to claim. */}
+      <Link
         href={nextHref}
-        onClick={() => breadcrumb("next")}
+        prefetch={false}
+        onNavigate={() => breadcrumb("next")}
         className="shrink-0 hover:text-neutral-900 dark:hover:text-neutral-100"
       >
         next →
-      </a>
-      {/* A Link, not a full-load anchor: /liked is a listing, not a page, so
-          the full-page-load rule (server-side re-resolution) doesn't apply and
-          no arrived_via breadcrumb is written. */}
+      </Link>
+      {/* /liked is a listing, not a page: leaving the library's address space
+          means no arrived_via breadcrumb is written. Prefetching is harmless
+          here — unlike an address, this route generates nothing. */}
       <Link
         href="/liked"
         className="shrink-0 hover:text-neutral-900 dark:hover:text-neutral-100"
