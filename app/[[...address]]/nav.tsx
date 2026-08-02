@@ -3,7 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { formatAddress, normalizeAddress } from "@/lib/address";
+import {
+  addressPath,
+  formatAddress,
+  normalizeAddress,
+  randomAddress,
+} from "@/lib/address";
 
 /**
  * The library's navigation: the only ways to move are wandering — random, the
@@ -15,15 +20,20 @@ import { formatAddress, normalizeAddress } from "@/lib/address";
  * address inline before navigating — the server still normalizes as the source
  * of truth.
  *
- * `random` alone navigates with a full page load: `/` is a server redirect to a
- * fresh address (page.tsx), so it must re-resolve server-side on every click —
- * which client-side routing and Link prefetching would defeat. `next →` and the
- * typed `go to` have no such constraint; both resolve to a known address (a pure
- * `nextAddress`, or a `normalizeAddress` validated right here), so they navigate
- * client-side and the shell, fonts and layout stay mounted while only the page
- * body swaps. marks.tsx is written to survive that — see the breadcrumb claim
- * and the `leave` event there, both of which would otherwise assume one
+ * All three wanders navigate client-side, so the shell, fonts and layout stay
+ * mounted and only the page body swaps. Each resolves its destination here,
+ * without a server round trip to decide where to go: `nextAddress` is pure,
+ * a typed address is `normalizeAddress`-validated inline, and `randomAddress`
+ * is nine lines of `Math.random()` — the same function `page.tsx` calls, in the
+ * same pure module. marks.tsx is written to survive this — see the breadcrumb
+ * claim and the `leave` event there, both of which would otherwise assume one
  * document load per page.
+ *
+ * The `/` route still resolves a fresh address server-side per request
+ * (page.tsx, behind `await connection()`), and must: it is what a typed URL, a
+ * shared link, a crawler and a JS-less browser get. Picking client-side changes
+ * what this *link* does, not what that route does — which is why `random` keeps
+ * a real `href="/"` underneath rather than becoming a button.
  */
 /**
  * Breadcrumb for the dwell beacon's `arrived_via` signal: written just before a
@@ -57,12 +67,38 @@ export function Nav({ nextHref }: { nextHref: string }) {
     router.push(`/${formatAddress(address)}`);
   }
 
+  /**
+   * Roll the dice in the browser and go straight there, skipping the `/`
+   * redirect hop entirely — same uniform distribution, one fewer round trip.
+   *
+   * Every early return below hands the click back to the anchor's `href="/"`,
+   * which is the honest fallback: a modified click (new tab/window) and a
+   * middle click both land on the server's own pick, and so does the whole
+   * element if this script never runs. The breadcrumb is written only past
+   * those returns, for the same reason `next →` uses `onNavigate` — a click
+   * that opens a new tab leaves THIS one standing, and a breadcrumb written
+   * for it would be claimed later by an unrelated navigation.
+   */
+  function wander(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (event.defaultPrevented) return;
+    if (event.button !== 0) return; // not a primary click
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    breadcrumb("random");
+    router.push(addressPath(randomAddress()));
+  }
+
   return (
     <nav className="flex min-w-0 flex-1 items-center justify-end gap-4">
+      {/* A real anchor, not a Link: the client-side destination is rolled fresh
+          per click (see `wander`), so there is no stable href for Link to hold —
+          and `href="/"` is exactly the right thing to fall back to. The lint
+          rule wants Link for internal routes; here the plain anchor IS the
+          no-JS/new-tab path, so it stays. */}
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
       <a
         href="/"
-        onClick={() => breadcrumb("random")}
+        onClick={wander}
         className="shrink-0 hover:text-neutral-900 dark:hover:text-neutral-100"
       >
         random
