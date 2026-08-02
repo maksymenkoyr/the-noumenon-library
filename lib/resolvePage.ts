@@ -6,6 +6,8 @@ import {
 } from "./economics";
 import { monitor } from "./monitor";
 import { generatePipeline } from "./pipeline";
+import type { PromptSegment } from "./prompts";
+import type { Provider } from "./providers";
 import {
   commitPage,
   getPage,
@@ -43,13 +45,19 @@ export interface ResolvedPage {
   moderationMs?: number;
   // The chain link that passed the committed content (lib/moderate.ts).
   moderationModel?: string;
-  // The exact prompt sent for this generation, plus the levers that produced
-  // it — fresh-generation only. The prompt is never persisted, so a revisit
-  // has no way to reconstruct the original; the overlay simply omits it
-  // rather than showing something approximate.
+  // The exact prompt sent for this generation, the labeled parts it was
+  // assembled from (lib/prompts.ts), and the levers that produced it. Read back
+  // from the stored inputs record, so a revisit shows the same panel as a fresh
+  // generation. `promptSegments` is absent for rows committed before segments
+  // were tracked — the overlay falls back to the flat `prompt` there.
   prompt?: string;
+  promptSegments?: PromptSegment[];
   promptVariant?: string;
   temperature?: number;
+  provider?: Provider;
+  // Applied constraint ids (also carried as `+id` suffixes on promptVariant).
+  constraints?: string[];
+  maxTokens?: number;
 }
 
 /**
@@ -67,8 +75,12 @@ export function devFields(
   | "moderationMs"
   | "moderationModel"
   | "prompt"
+  | "promptSegments"
   | "promptVariant"
   | "temperature"
+  | "provider"
+  | "constraints"
+  | "maxTokens"
 > {
   if (!inputs) return { model: fallbackModel ?? undefined };
   return {
@@ -77,8 +89,12 @@ export function devFields(
     moderationMs: inputs.moderationMs,
     moderationModel: inputs.moderationModel,
     prompt: inputs.prompt,
+    promptSegments: inputs.promptSegments,
     promptVariant: inputs.promptVariant,
     temperature: inputs.temperature,
+    provider: inputs.provider,
+    constraints: inputs.constraints,
+    maxTokens: inputs.maxTokens,
   };
 }
 

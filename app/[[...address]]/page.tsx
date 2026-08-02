@@ -12,6 +12,7 @@ import { getClientIp } from "@/lib/clientIp";
 import { config } from "@/lib/config";
 import { getDevMode } from "@/lib/devMode";
 import { getLikeCount } from "@/lib/engagement";
+import type { PromptSegment } from "@/lib/prompts";
 import { devFields, resolvePage, type ResolvedPage } from "@/lib/resolvePage";
 import { getPage } from "@/lib/store";
 import { DevBadge } from "./dev-badge";
@@ -127,8 +128,11 @@ async function PageBody({
         moderationModel={resolved.moderationModel}
         moderationMs={resolved.moderationMs}
         prompt={resolved.prompt}
+        promptSegments={resolved.promptSegments}
         promptVariant={resolved.promptVariant}
         temperature={resolved.temperature}
+        provider={resolved.provider}
+        maxTokens={resolved.maxTokens}
       />
     );
   }
@@ -153,8 +157,11 @@ async function CommittedPage({
   moderationModel,
   moderationMs,
   prompt,
+  promptSegments,
   promptVariant,
   temperature,
+  provider,
+  maxTokens,
 }: {
   address: string;
   text: string;
@@ -166,10 +173,14 @@ async function CommittedPage({
   // Dev provenance (lib/resolvePage.ts ResolvedPage / devFields); populated on
   // both the synchronous committed-revisit path above and the streamed
   // fresh-generation path below, sourced from the stored PageInputs record.
-  // Undefined only for rows committed before pages.inputs existed.
+  // Undefined only for rows committed before pages.inputs existed;
+  // `promptSegments` additionally for rows predating segment tracking.
   prompt?: string;
+  promptSegments?: PromptSegment[];
   promptVariant?: string;
   temperature?: number;
+  provider?: string;
+  maxTokens?: number;
 }) {
   const likeCount = await getLikeCount(address);
   return (
@@ -182,8 +193,11 @@ async function CommittedPage({
           moderationModel={moderationModel}
           moderationMs={moderationMs}
           prompt={prompt}
+          promptSegments={promptSegments}
           promptVariant={promptVariant}
           temperature={temperature}
+          provider={provider}
+          maxTokens={maxTokens}
         />
       )}
       <Marks address={address} initialCount={likeCount} />
