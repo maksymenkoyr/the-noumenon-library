@@ -7,6 +7,7 @@ import {
 } from "./generate";
 import { moderate, type ModerationResult } from "./moderate";
 import { monitor } from "./monitor";
+import type { PromptSegment } from "./prompts";
 import { contentExistsElsewhere, hashContent, type PageInputs } from "./store";
 
 /**
@@ -37,6 +38,7 @@ export interface PipelineResult {
 function inputsFrom(
   levers: GenerationLevers,
   prompt: string,
+  promptSegments: PromptSegment[],
   generationMs: number,
   moderationMs: number,
   moderationModel?: string,
@@ -45,10 +47,12 @@ function inputsFrom(
     model: levers.model,
     provider: levers.provider,
     temperature: levers.temperature,
+    maxTokens: levers.maxTokens,
     // Applied constraints ride as `+id` suffixes (e.g. `base-v1+no-library`).
     promptVariant: provenanceVariant(levers),
     constraints: levers.constraints.map((c) => c.id),
     prompt,
+    promptSegments,
     moderationModel,
     generationMs,
     moderationMs,
@@ -62,18 +66,22 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   let moderationMs = 0;
   // Runs generation for the given levers, folds in usage and generation
   // time, and — since generatePage() may fall back to a different pool
-  // model on a retryable error — updates `levers.model`/`levers.provider` in
-  // place so provenance always names the model that actually produced the
-  // content, not just the one requested. Also returns the exact prompt sent,
+  // model on a retryable error — updates `levers.model`/`levers.provider`/
+  // `levers.maxTokens` in place so provenance always names the model that
+  // actually produced the content (and the ceiling it ran under), not just the
+  // one requested. Also returns the exact prompt sent and its labeled parts,
   // for the caller to track alongside content (dev-overlay provenance).
-  const run = async (l: GenerationLevers): Promise<{ text: string; prompt: string }> => {
+  const run = async (
+    l: GenerationLevers,
+  ): Promise<{ text: string; prompt: string; promptSegments: PromptSegment[] }> => {
     const result = await generatePage(l);
     usage.tokens += result.usage.tokens;
     usage.costUsd += result.usage.costUsd;
     generationMs += result.durationMs;
     l.model = result.model;
     l.provider = result.provider;
-    return { text: result.text, prompt: result.prompt };
+    l.maxTokens = result.maxTokens;
+    return { text: result.text, prompt: result.prompt, promptSegments: result.promptSegments };
   };
   // Runs moderation and folds in its wall time, kept separate from generation
   // time above (dev-overlay provenance — see PipelineResult). Returns the full
@@ -90,13 +98,13 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   // (lib/generate.ts), and each regeneration below bumps the attempt index so
   // a retry deterministically draws a different sample than the one it replaces.
   let levers = await chooseLevers(address, 0);
-  let { text: content, prompt } = await run(levers);
+  let { text: content, prompt, promptSegments } = await run(levers);
 
   let modResult = await check(content);
   if (!modResult.ok) {
     // Moderation fail → regenerate once with fresh levers (architecture §7).
     levers = await chooseLevers(address, 1);
-    ({ text: content, prompt } = await run(levers));
+    ({ text: content, prompt, promptSegments } = await run(levers));
     modResult = await check(content);
     if (!modResult.ok) {
       // Two rejects in a row. We never store failing content, but we no longer
@@ -121,13 +129,21 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
       levers = dedupLevers;
       content = dedupRun.text;
       prompt = dedupRun.prompt;
+      promptSegments = dedupRun.promptSegments;
       moderationModel = dedupModResult.model;
     }
   }
 
   return {
     content,
-    inputs: inputsFrom(levers, prompt, generationMs, moderationMs, moderationModel),
+    inputs: inputsFrom(
+      levers,
+      prompt,
+      promptSegments,
+      generationMs,
+      moderationMs,
+      moderationModel,
+    ),
     usage,
   };
 }

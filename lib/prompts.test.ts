@@ -4,6 +4,8 @@ import {
   GENERATION_CONSTRAINTS,
   PROMPT_VARIANT_IDS,
   buildPrompt,
+  buildPromptSegments,
+  joinSegments,
 } from "./prompts";
 
 const ctx = { maxWords: 400 };
@@ -32,16 +34,19 @@ describe("buildPrompt", () => {
   });
 
   it("appends sampled constraints, and omits the slot when none fired", () => {
-    const constraints = GENERATION_CONSTRAINTS.map((c) => c.text);
-    const withConstraints = buildPrompt(DEFAULT_PROMPT_VARIANT, { ...ctx, constraints });
-    for (const text of constraints) expect(withConstraints).toContain(text);
+    const texts = GENERATION_CONSTRAINTS.map((c) => c.text);
+    const withConstraints = buildPrompt(DEFAULT_PROMPT_VARIANT, {
+      ...ctx,
+      constraints: GENERATION_CONSTRAINTS,
+    });
+    for (const text of texts) expect(withConstraints).toContain(text);
     // Constraints follow the size clause inside the same paragraph.
-    expect(withConstraints.indexOf(constraints[0])).toBeGreaterThan(
+    expect(withConstraints.indexOf(texts[0])).toBeGreaterThan(
       withConstraints.indexOf("finished whole"),
     );
 
     const without = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
-    for (const text of constraints) expect(without).not.toContain(text);
+    for (const text of texts) expect(without).not.toContain(text);
     expect(without).not.toMatch(/\s{2,}$/m);
   });
 
@@ -67,5 +72,46 @@ describe("buildPrompt", () => {
 
   it("throws on an unknown variant", () => {
     expect(() => buildPrompt("does-not-exist", ctx)).toThrow(/unknown prompt variant/i);
+    expect(() => buildPromptSegments("does-not-exist", ctx)).toThrow(/unknown prompt variant/i);
+  });
+});
+
+describe("buildPromptSegments", () => {
+  const withAll = { ...ctx, constraints: GENERATION_CONSTRAINTS };
+
+  it("joins back into exactly the prompt that is sent", () => {
+    // The segmentation is a view onto the prompt, never a change to it: the
+    // dev overlay shows the parts, the model still gets this string.
+    for (const c of [ctx, withAll]) {
+      expect(joinSegments(buildPromptSegments(DEFAULT_PROMPT_VARIANT, c))).toBe(
+        buildPrompt(DEFAULT_PROMPT_VARIANT, c),
+      );
+    }
+    // Framing paragraph, blank line, then the size clause and its constraints
+    // as one running paragraph.
+    const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, withAll);
+    const [framing, length, ...rest] = buildPromptSegments(DEFAULT_PROMPT_VARIANT, withAll);
+    expect(prompt).toBe(
+      [framing.text, [length.text, ...rest.map((s) => s.text)].join(" ")].join("\n\n"),
+    );
+  });
+
+  it("labels every part, and carries each constraint's dial setting", () => {
+    expect(buildPromptSegments(DEFAULT_PROMPT_VARIANT, withAll).map((s) => s.id)).toEqual([
+      "framing",
+      "length",
+      ...GENERATION_CONSTRAINTS.map((c) => c.id),
+    ]);
+    for (const seg of buildPromptSegments(DEFAULT_PROMPT_VARIANT, withAll)) {
+      const constraint = GENERATION_CONSTRAINTS.find((c) => c.id === seg.id);
+      expect(seg.probability).toBe(constraint?.probability);
+    }
+  });
+
+  it("emits only framing and length when no constraint fired", () => {
+    expect(buildPromptSegments(DEFAULT_PROMPT_VARIANT, ctx).map((s) => s.id)).toEqual([
+      "framing",
+      "length",
+    ]);
   });
 });

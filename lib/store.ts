@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { config } from "./config";
 import { query } from "./db";
+import type { PromptSegment } from "./prompts";
 import type { Provider } from "./providers";
 
 /**
@@ -44,8 +45,14 @@ export interface PageInputs {
   promptVariant?: string;
   // Applied constraint ids (unsuffixed), for structured querying.
   constraints?: string[];
-  // The exact prompt sent for whichever attempt ended up committed.
+  // The exact prompt sent for whichever attempt ended up committed, plus the
+  // labeled parts it was assembled from (lib/prompts.ts) — the dev overlay
+  // renders the parts and falls back to the flat string for rows committed
+  // before segments were tracked. Additive in JSONB, so no migration.
   prompt?: string;
+  promptSegments?: PromptSegment[];
+  // The token ceiling the committed generation ran under.
+  maxTokens?: number;
   // The chain link that passed the committed content (lib/moderate.ts).
   moderationModel?: string;
   generationMs?: number;

@@ -23,7 +23,7 @@ import {
   type GenerationLevers,
 } from "./generate";
 import { FREE_TIER_KEY } from "./modelStats";
-import { buildPrompt, GENERATION_CONSTRAINTS } from "./prompts";
+import { buildPrompt, GENERATION_CONSTRAINTS, joinSegments } from "./prompts";
 
 /** A minimal fake OpenAI chat completion. */
 function completion(content: string, totalTokens = 0) {
@@ -163,6 +163,9 @@ describe("generatePage fallback", () => {
     expect(createMock.mock.calls[0][0]).toMatchObject({
       messages: [{ role: "user", content: expectedPrompt }],
     });
+    // The same prompt, also carried as its labeled parts for the dev overlay.
+    expect(result.promptSegments.map((s) => s.id)).toEqual(["framing", "length"]);
+    expect(joinSegments(result.promptSegments)).toBe(expectedPrompt);
   });
 
   it("skips a model that is already on cooldown when building the fallback list", async () => {

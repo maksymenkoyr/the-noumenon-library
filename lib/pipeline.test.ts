@@ -46,6 +46,12 @@ const gen = (text: string, model = "mock-model") => ({
   provider: "openrouter" as const,
   usage: { tokens: 100, costUsd: 0 },
   prompt: `prompt for: ${text}`,
+  // The labeled parts the prompt was assembled from (lib/prompts.ts); the real
+  // segmentation is covered in prompts.test.ts.
+  promptSegments: [
+    { id: "framing", text: `prompt for: ${text}`, join: "paragraph" as const },
+  ],
+  maxTokens: 1000,
   durationMs: 500,
 });
 
@@ -99,6 +105,12 @@ describe("generatePipeline", () => {
     // The exact prompt that produced the committed content (dev-overlay
     // provenance, lib/resolvePage.ts / lib/devMode).
     expect(result.inputs.prompt).toBe("prompt for: a unique page");
+    // ...and the labeled parts it was assembled from, so the overlay can show
+    // the prompt structured rather than as one blob.
+    expect(result.inputs.promptSegments).toEqual([
+      { id: "framing", text: "prompt for: a unique page", join: "paragraph" },
+    ]);
+    expect(result.inputs.maxTokens).toBe(1000);
     // Generation and moderation time are reported separately, not as one total.
     expect(result.inputs.generationMs).toBe(500);
     expect(result.inputs.moderationMs).toBe(50);
