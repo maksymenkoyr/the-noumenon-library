@@ -25,6 +25,8 @@ export function DevBadge({
   temperature,
   seedWord,
   maxWords,
+  startMode,
+  endMode,
 }: {
   model?: string | null;
   generationMs?: number;
@@ -35,6 +37,8 @@ export function DevBadge({
   temperature?: number;
   seedWord?: string;
   maxWords?: number;
+  startMode?: string;
+  endMode?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   if (!model && generationMs == null && moderationMs == null) return null;
@@ -83,6 +87,14 @@ export function DevBadge({
               <>
                 <dt>words</dt>
                 <dd>≤ {maxWords}</dd>
+              </>
+            )}
+            {(startMode || endMode) && (
+              <>
+                <dt>edges</dt>
+                <dd>
+                  {startMode ?? "?"} → {endMode ?? "?"}
+                </dd>
               </>
             )}
           </dl>

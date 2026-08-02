@@ -54,6 +54,8 @@ export interface ResolvedPage {
   // live in the stored inputs record, so they show on a revisit too.
   seedWord?: string;
   maxWords?: number;
+  startMode?: string;
+  endMode?: string;
 }
 
 /**
@@ -75,6 +77,8 @@ export function devFields(
   | "temperature"
   | "seedWord"
   | "maxWords"
+  | "startMode"
+  | "endMode"
 > {
   if (!inputs) return { model: fallbackModel ?? undefined };
   return {
@@ -87,6 +91,8 @@ export function devFields(
     temperature: inputs.temperature,
     seedWord: inputs.seedWord,
     maxWords: inputs.maxWords,
+    startMode: inputs.startMode,
+    endMode: inputs.endMode,
   };
 }
 

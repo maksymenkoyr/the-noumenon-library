@@ -21,6 +21,8 @@ import {
   buildPrompt,
   DEFAULT_PROMPT_VARIANT,
   GENERATION_CONSTRAINTS,
+  pickAbruptness,
+  type Abruptness,
   type PromptConstraint,
 } from "./prompts";
 import { chooseGenerationModel, markCooling, markHealthy, markUnavailable, poolFor } from "./registry";
@@ -47,6 +49,12 @@ export interface GenerationLevers {
   // [config.pageMinWords, config.pageMaxWords]. Not the same thing as
   // maxTokens: that is the hard provider cap, this is the shape we ask for.
   maxWords: number;
+  // How abruptly the text opens and stops, drawn independently (nine
+  // combinations). Ids are persisted; the phrases go into the prompt.
+  start: Abruptness;
+  end: Abruptness;
+  startPhrase: string;
+  endPhrase: string;
   promptVariant: string;
   // Dynamic constraints sampled for this page. Their ids ride into
   // provenance via provenanceVariant().
@@ -135,6 +143,8 @@ export async function chooseLevers(
   const constraints = sampleConstraints(rng);
   const temperature = jitteredTemperature(chosen.temperature, rng);
   const maxWords = jitteredMaxWords(rng);
+  const start = pickAbruptness(rng);
+  const end = pickAbruptness(rng);
   // Drawn from a separate, volume-scoped stream (lib/seededRandom.ts
   // volumeSeed) rather than the page stream above: the subject must hold
   // across all 410 pages of a volume, and must survive a retry's redraw.
@@ -143,7 +153,8 @@ export async function chooseLevers(
   devLog(
     `generate address=${address} attempt=${attempt} model=${chosen.slug} ` +
       `provider=${chosen.provider} temp=${temperature.toFixed(2)} ` +
-      `maxWords=${maxWords} variant=${promptVariant}` +
+      `maxWords=${maxWords} start=${start.id} end=${end.id} ` +
+      `variant=${promptVariant}` +
       (seedTerm ? ` seed=${seedTerm}` : "") +
       (constraints.length
         ? ` constraints=${constraints.map((c) => c.id).join(",")}`
@@ -155,6 +166,10 @@ export async function chooseLevers(
     temperature,
     maxTokens: chosen.maxTokens,
     maxWords,
+    start: start.id,
+    end: end.id,
+    startPhrase: start.phrase,
+    endPhrase: end.phrase,
     promptVariant,
     constraints,
     seedTerm,
@@ -240,6 +255,8 @@ export async function generatePage(
   const constraintTexts = levers.constraints.map((c) => c.text);
   const prompt = buildPrompt(levers.promptVariant, {
     maxWords: levers.maxWords,
+    start: levers.startPhrase,
+    end: levers.endPhrase,
     constraints: constraintTexts,
     seedTerm: levers.seedTerm,
   });

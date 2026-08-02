@@ -52,6 +52,12 @@ export interface PageInputs {
   // Word budget asked for in the prompt, drawn per page. Kept so a page's
   // length can be read against what was requested.
   maxWords?: number;
+  // How abruptly the text was asked to open and stop (lib/prompts.ts
+  // Abruptness). Kept here rather than suffixed onto promptVariant: nine
+  // combinations would multiply the variant_signals buckets ninefold. Query
+  // them off the JSONB instead — `inputs->>'startMode'`.
+  startMode?: string;
+  endMode?: string;
   // The exact prompt sent for whichever attempt ended up committed.
   prompt?: string;
   // The chain link that passed the committed content (lib/moderate.ts).

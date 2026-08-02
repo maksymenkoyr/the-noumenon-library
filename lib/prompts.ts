@@ -1,170 +1,182 @@
 /**
- * Prompt variants — the prompt-variation entropy lever (docs/reference/generation.md).
+ * The generation prompt — assembled from four independent parameters
+ * (docs/reference/generation.md).
  *
- * The generation prompt is the highest-leverage artifact in the project. The
- * model is framed as a *transcriber* of a text found in the library, never as
- * the page itself — an earlier "you are a page … generate the text found on
- * this page" framing made the model narrate *being* a page ("I am a page, thin
- * and quiet…"), the self-orientation the "you do not know what you are" phrase
- * is meant to prevent. Here the not-knowing is aimed at the page ("what it
- * is"), not the model.
+ * The prompt used to open by establishing an endless library and framing the
+ * model as a *transcriber* of a page found in it. That framing existed to stop
+ * the model narrating *being* a page ("I am a page, thin and quiet…"), and it
+ * worked — but it cost thirty words, and it primed "library" so hard that a
+ * second constraint had to spend eighteen more undoing it on three pages in
+ * four. Testing four formats against a live model showed a bare
+ * "Generate … text" opener produces no assistant preamble and no self-narration
+ * either: stating that the text *begins mid-sentence* does the same job in three
+ * words, because a text that starts mid-sentence cannot also introduce itself.
  *
- * There is a single base variant, `base-v1`. All prompt-side variety comes
- * from the **constraints pool** (`GENERATION_CONSTRAINTS`): a set of facts
- * about the found page, each sampled independently per page by its own
- * probability, appended as plain sentences. A constraint is a *dial*, not a
- * rule — no register labels, no combinatorial axes, no per-variant A/B
- * machinery. The text is still framed as *found*, not written to order (frees
- * the model from intentionality); anti-patterns in
- * docs/reference/generation.md are respected. The chosen constraint ids are
- * logged per page as provenance (a `+id` suffix on `prompt_variant`).
+ * So `base-v2` states four things and nothing else:
+ *
+ *   Generate about 270 words of text. It begins mid-sentence and ends
+ *   mid-sentence. Something in it has to do with turquoise.
+ *
+ *   length  — drawn per page from [pageMinWords, pageMaxWords]
+ *   start   — how abruptly it opens        } drawn independently:
+ *   end     — how abruptly it stops        } nine combinations
+ *   seed    — the gallery's association term (lib/gallerySeeds.ts)
+ *
+ * Prose, not a `Key: value` block. In testing, a block overshot the stated word
+ * count by 17–23% and ignored its own `Ends: mid-sentence.` line — a parameter
+ * list reads as metadata *describing* the text rather than instructions for it.
+ *
+ * On top of that sits the **constraints pool** (`GENERATION_CONSTRAINTS`):
+ * facts about the text, each sampled independently per page by its own
+ * probability. A constraint is a *dial*, not a rule — no register labels, no
+ * combinatorial axes, no per-variant A/B machinery. Applied ids are logged as a
+ * `+id` suffix on `prompt_variant`.
+ *
+ * Worth knowing before reaching for this file to fix variety: all four tested
+ * formats produced the same literary-vignette register. Prompt *wording* is not
+ * what holds the pages in one place — the seed term and the model choice move
+ * the distribution; phrasing barely does.
  */
+
+/** How abruptly the text opens or stops. Logged per page as provenance. */
+export type Abruptness = "mid-sentence" | "mid-word" | "clean";
+
+export interface AbruptnessOption {
+  id: Abruptness;
+  // Slots into both "It begins ___" and "and ends ___", so every value reads
+  // correctly in either position.
+  phrase: string;
+  weight: number;
+}
+
+/**
+ * `mid-word` is the most aggressive and the most true to a real page — a book's
+ * page break lands wherever it lands — but it is also the most likely to read
+ * as a broken generation rather than an authentic slice, so it stays rare.
+ * Drawn separately for start and end, giving nine combinations.
+ */
+export const ABRUPTNESS: readonly AbruptnessOption[] = [
+  { id: "mid-sentence", phrase: "mid-sentence", weight: 45 },
+  { id: "clean", phrase: "cleanly", weight: 40 },
+  { id: "mid-word", phrase: "mid-word", weight: 15 },
+];
+
+/** Weighted draw from the abruptness pool, off the caller's seeded stream. */
+export function pickAbruptness(rng: () => number): AbruptnessOption {
+  const total = ABRUPTNESS.reduce((sum, o) => sum + o.weight, 0);
+  let r = rng() * total;
+  for (const option of ABRUPTNESS) {
+    r -= option.weight;
+    if (r <= 0) return option;
+  }
+  return ABRUPTNESS[ABRUPTNESS.length - 1]; // floating-point rounding fallback
+}
 
 export interface PromptContext {
   // Drawn per page from the address-seeded stream (lib/generate.ts), not a
-  // constant — see the length note on the builder below.
+  // constant — length is an entropy axis, not a fixed page size.
   maxWords: number;
-  // Sampled constraint sentences (GENERATION_CONSTRAINTS), appended to the
-  // prompt in order. Facts about the found page, never orders to a writer —
-  // the transcriber framing holds. Empty when nothing fired.
+  // Abruptness phrases, drawn independently. Default to the commonest value so
+  // a minimal caller (tests) still builds a valid prompt.
+  start?: string;
+  end?: string;
+  // Sampled constraint sentences (GENERATION_CONSTRAINTS), appended in order.
+  // Facts about the text, never orders to a writer. Empty when nothing fired.
   constraints?: readonly string[];
   // One association term drawn from the page's *gallery* (lib/gallerySeeds.ts),
   // stable across every page of a volume. Undefined when the gallery has no
-  // stored terms yet or the association call failed — the prompt then reads
-  // exactly as it did before this lever existed.
+  // stored terms yet or the association call failed — the prompt then simply
+  // omits the clause.
   seedTerm?: string;
 }
 
 type PromptBuilder = (ctx: PromptContext) => string;
 
-/**
- * The dynamic-constraint pool: the sole prompt-side variety lever. Each entry
- * is sampled independently per page with its own probability, so a constraint
- * is a *dial*, not a rule.
- *
- * `no-library` exists because the opener's "endless library" primes the
- * models hard: two 20-page wander reports each had ~6 pages set in or about
- * infinite libraries — the prompt's fingerprint, not the collection's honest
- * base rate. A global ban would be wrong (a library of every text does
- * contain pages about libraries); applying the exclusion to about three
- * quarters of pages restores rarity while keeping the topic possible.
- *
- * `self-reference` guards against the "Page 47,821,903 of the Unbound Codex"
- * self-titling tic — the model narrating that it *is* a page, giving itself a
- * page number, or addressing the reader. Sampled like any other dial rather
- * than hardcoded into the builder, so the pool stays the single source of
- * every appended sentence.
- *
- * Everything below `self-reference` is an **entropy dial**: a low-probability
- * proscription that closes off one habitual move, so the model has to reach
- * somewhere it would not otherwise go. They are deliberately *negative*. The
- * removed GENERATION_FORMS lever (commit 6d613cc) prescribed a register
- * ("reads like a prayer") and produced pastiche — the model writes *toward* a
- * label. Forbidding names no destination, so it widens the output distribution
- * instead of relocating it. Both surviving pre-existing constraints are
- * negative for the same reason; keep new dials that way.
- *
- * Each is independent, so they stack combinatorially — that pressure is the
- * point (two firing together lands on ~14% of pages, three on ~2%), but it is
- * also why they sit at 0.15 rather than the 0.75 of the two corrective
- * constraints above. Those two fix a known failure; these only widen the range.
- *
- * The chosen ids are logged in provenance (`prompt_variant` suffix, e.g.
- * `base-v1+no-library`) so wander reports can attribute each constraint's
- * effect.
- */
 export interface PromptConstraint {
   id: string; // short slug, logged as a prompt_variant suffix
   text: string; // full sentence appended to the prompt
   probability: number; // chance per page of applying, in [0, 1]
 }
 
+/**
+ * The dynamic-constraint pool: facts about the text, sampled independently, so
+ * a constraint is a *dial* rather than a rule.
+ *
+ * Every entry is an **entropy dial** — a low-probability proscription that
+ * closes off one habitual move, so the model has to reach somewhere it would
+ * not otherwise go. They are deliberately *negative*. The removed
+ * GENERATION_FORMS lever (commit 6d613cc) prescribed a register ("reads like a
+ * prayer") and produced pastiche — the model writes *toward* a label.
+ * Forbidding names no destination, so it widens the output distribution instead
+ * of relocating it. Keep new dials that way.
+ *
+ * This pool used to also carry two *correctives* at 0.75 — `no-library`, which
+ * suppressed the theme the old opener primed, and `self-reference`, which
+ * stopped the model titling itself "Page 47,821,903 of the Unbound Codex".
+ * Both were deleted with the premise that caused them: there is no library in
+ * the prompt to mention, and no "page" language to self-reference.
+ *
+ * Each dial is independent, so they stack combinatorially — that pressure is
+ * the point (two firing together lands on ~14% of pages, three on ~2%). They
+ * are also the only remaining lever that constrains *what kind of thing* the
+ * text is, which matters more than it looks: every prompt format tested
+ * produced the same literary-vignette register without them.
+ */
 export const GENERATION_CONSTRAINTS: readonly PromptConstraint[] = [
   {
-    id: "no-library",
-    text:
-      "This particular page happens to contain no mention of libraries, " +
-      "shelves, archives, librarians, or infinite collections of texts.",
-    probability: 0.75,
-  },
-  {
-    id: "self-reference",
-    text:
-      "This particular page does not speak of itself as a page, give itself " +
-      "a page number, or address whoever is reading it.",
-    probability: 0.75,
-  },
-  {
     id: "no-persons",
-    text:
-      "This particular page has no human being anywhere in it — no one acts " +
-      "on it and no one is described.",
+    text: "No human being appears in it — no one acts and no one is described.",
     probability: 0.15,
   },
   {
     id: "no-speech",
-    text:
-      "This particular page carries no speech: nothing on it is said aloud, " +
-      "quoted, or set as dialogue.",
+    text: "Nothing in it is said aloud, quoted, or set as dialogue.",
     probability: 0.15,
   },
   {
     id: "no-sequence",
-    text:
-      "This particular page does not narrate — nothing on it happens in " +
-      "sequence, one event after another.",
+    text: "Nothing in it happens in sequence, one event after another.",
     probability: 0.15,
   },
   {
     id: "no-abstraction",
     text:
-      "This particular page names only what could be touched or counted, " +
-      "holding throughout to concrete particulars.",
+      "It names only what could be touched or counted, holding to concrete " +
+      "particulars throughout.",
     probability: 0.15,
   },
   {
     id: "no-past",
-    text: "This particular page describes nothing as having already happened.",
+    text: "Nothing in it is described as having already happened.",
     probability: 0.15,
   },
 ];
 
-/**
- * The length/shape clause used to end "...and it must read as a finished whole
- * — never cut off mid-thought." That clause cancelled the fragment permission
- * standing beside it: measured across every page stored at the time, the
- * collection ran 320–417 words with a 367 mean and *no* fragments at all, so
- * the stated range was fiction. Two causes, both fixed here — `maxWords` was a
- * constant (it is now drawn per page, lib/generate.ts), and "finished whole"
- * forced every page into the shape of a complete little essay.
- *
- * A page of a real book is a slice: it begins and ends wherever the previous
- * and next pages leave off. Saying so makes partialness *diegetic* rather than
- * a truncated-looking generation — the distinction matters, since an empty or
- * clipped completion is a genuine failure mode that lib/generate.ts retries.
- */
 const VARIANTS: Record<string, PromptBuilder> = {
-  "base-v1": ({ maxWords, constraints = [], seedTerm }) =>
+  // One paragraph, one sentence per parameter. `base-v1` (the endless-library
+  // transcriber prompt) is retired rather than kept alongside: commit d8905e0
+  // deliberately collapsed generation to a single variant, and the id is bumped
+  // because reusing it would make provenance lie — rows recording `base-v1`
+  // came from materially different text.
+  "base-v2": ({
+    maxWords,
+    start = "mid-sentence",
+    end = "mid-sentence",
+    constraints = [],
+    seedTerm,
+  }) =>
     [
-      "An endless library holds every text that could ever be written. You are " +
-        "reading one page from it; set down exactly what is on it. You do not " +
-        "know what it is or where it sits.",
-      "",
-      [
-        "What is on it may be a few lines or fill the page, up to about " +
-          `${maxWords} words. A page is a slice: it may begin or end ` +
-          "mid-sentence, and needs no beginning or ending of its own.",
-        // The gallery's association term. Deliberately loose ("something ...
-        // has to do with"): a bare noun stated as the subject turns the page
-        // into an encyclopedia entry about it. Sits before the constraints so
-        // the negative facts read as refinements of it.
-        ...(seedTerm ? [`Something on this page has to do with ${seedTerm}.`] : []),
-        ...constraints,
-      ].join(" "),
-    ].join("\n"),
+      `Generate about ${maxWords} words of text.`,
+      `It begins ${start} and ends ${end}.`,
+      // The gallery's association term. Deliberately loose ("something in it
+      // has to do with"): a bare noun stated as the subject turns the text into
+      // an encyclopedia entry about it.
+      ...(seedTerm ? [`Something in it has to do with ${seedTerm}.`] : []),
+      ...constraints,
+    ].join(" "),
 };
 
-export const DEFAULT_PROMPT_VARIANT = "base-v1";
+export const DEFAULT_PROMPT_VARIANT = "base-v2";
 
 export const PROMPT_VARIANT_IDS = Object.keys(VARIANTS);
 

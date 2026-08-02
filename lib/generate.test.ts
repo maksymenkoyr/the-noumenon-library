@@ -46,7 +46,11 @@ const levers: GenerationLevers = {
   temperature: 0.9,
   maxTokens: 1000,
   maxWords: 400,
-  promptVariant: "base-v1",
+  start: "mid-sentence",
+  end: "mid-sentence",
+  startPhrase: "mid-sentence",
+  endPhrase: "mid-sentence",
+  promptVariant: "base-v2",
   constraints: [],
 };
 
@@ -167,7 +171,9 @@ describe("generatePage fallback", () => {
     const result = await generatePage(levers);
 
     const expectedPrompt = buildPrompt(levers.promptVariant, {
-      maxWords: config.pageMaxWords,
+      maxWords: levers.maxWords,
+      start: levers.startPhrase,
+      end: levers.endPhrase,
       constraints: [],
     });
     expect(result.prompt).toBe(expectedPrompt);
@@ -242,9 +248,9 @@ describe("chooseLevers", () => {
     }
   });
 
-  it("defaults to base-v1", async () => {
+  it("defaults to base-v2", async () => {
     const result = await chooseLevers("addr");
-    expect(result.promptVariant).toBe("base-v1");
+    expect(result.promptVariant).toBe("base-v2");
   });
 
   it("is a reproducible function of the address (same seed → same levers)", async () => {
@@ -264,17 +270,19 @@ describe("chooseLevers", () => {
 
   it("samples constraints from the seed — deterministic, and address-dependent", async () => {
     // Across many addresses the constraint both fires and doesn't, proving it
-    // is sampled (not always-on/off) and driven by the seed.
+    // is sampled (not always-on/off) and driven by the seed. Every dial now
+    // sits at 0.15, so 200 draws makes "never fires" vanishingly unlikely
+    // (0.85^200) without pinning the test to a specific probability.
     const fired = new Set<boolean>();
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 200; i++) {
       const levers = await chooseLevers(`addr-${i}`);
-      fired.add(levers.constraints.some((c) => c.id === "no-library"));
+      fired.add(levers.constraints.some((c) => c.id === "no-persons"));
     }
     expect(fired).toEqual(new Set([true, false]));
 
     // Whatever fired is reflected in the provenance variant suffix.
     const one = await chooseLevers("addr-0");
-    const expected = "base-v1" + one.constraints.map((c) => `+${c.id}`).join("");
+    const expected = "base-v2" + one.constraints.map((c) => `+${c.id}`).join("");
     expect(provenanceVariant(one)).toBe(expected);
     expect(GENERATION_CONSTRAINTS.length).toBeGreaterThan(0);
   });
@@ -316,6 +324,38 @@ describe("chooseLevers", () => {
     const retry = await chooseLevers("bmw89/3/2/17/1", 1);
     expect(retry.seedTerm).toBe(first.seedTerm);
     expect(retry.maxWords).not.toBe(first.maxWords);
+  });
+
+  it("draws start and end independently, and reproducibly", async () => {
+    const pairs = new Set<string>();
+    const starts = new Set<string>();
+    const ends = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const l = await chooseLevers(`g/1/1/1/${i + 1}`);
+      pairs.add(`${l.start}>${l.end}`);
+      starts.add(l.start);
+      ends.add(l.end);
+    }
+    // All three modes reachable in each position...
+    expect(starts.size).toBe(3);
+    expect(ends.size).toBe(3);
+    // ...and independent, so the pair space is wider than either alone. Nine
+    // combinations is the point of splitting the two.
+    expect(pairs.size).toBeGreaterThan(3);
+
+    const a = await chooseLevers("gallery/1/2/3/4");
+    const b = await chooseLevers("gallery/1/2/3/4");
+    expect(b.start).toBe(a.start);
+    expect(b.end).toBe(a.end);
+  });
+
+  it("puts the drawn abruptness into the prompt it sends", async () => {
+    const chosen = await chooseLevers("g/1/1/1/7");
+    createMock.mockResolvedValueOnce(completion("page text"));
+    const result = await generatePage(chosen);
+    expect(result.prompt).toContain(
+      `It begins ${chosen.startPhrase} and ends ${chosen.endPhrase}.`,
+    );
   });
 
   it("puts the seed term in the prompt but never the address", async () => {

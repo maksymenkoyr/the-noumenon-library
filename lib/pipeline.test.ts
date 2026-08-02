@@ -102,8 +102,8 @@ describe("generatePipeline", () => {
     expect(result.inputs.model).toBeTruthy();
     expect(result.inputs.provider).toBe("openrouter");
     expect(result.inputs.temperature).toBeGreaterThan(0);
-    // base-v1, plus a `+id` suffix per constraint that happened to fire.
-    expect(result.inputs.promptVariant).toMatch(/^base-v1(\+[a-z-]+)*$/);
+    // base-v2, plus a `+id` suffix per constraint that happened to fire.
+    expect(result.inputs.promptVariant).toMatch(/^base-v2(\+[a-z-]+)*$/);
     expect(result.inputs.constraints).toBeInstanceOf(Array);
     // The exact prompt that produced the committed content (dev-overlay
     // provenance, lib/resolvePage.ts / lib/devMode).

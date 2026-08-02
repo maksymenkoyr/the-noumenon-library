@@ -52,6 +52,8 @@ function inputsFrom(
     // promptVariant — see PageInputs.seedWord.
     seedWord: levers.seedTerm,
     maxWords: levers.maxWords,
+    startMode: levers.start,
+    endMode: levers.end,
     prompt,
     moderationModel,
     generationMs,
