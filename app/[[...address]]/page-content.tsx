@@ -1,3 +1,5 @@
+import { PageArrivedSignal } from "./intro-signal";
+
 /**
  * Page rendering — the page as a fixed-size container holding a variable amount
  * of text (docs/reference/experience.md "The fixed-size page", architecture §6).
@@ -64,6 +66,13 @@ export function PlaceholderPage({
     <div
       className={`flex ${PAGE_HEIGHT} flex-col items-center justify-center gap-4 text-center`}
     >
+      {/* A placeholder is a final state too (docs: "explore"/"rate_limited"/
+          "taken_down" persist nothing but still resolve the visit) — the
+          first-visit intro (intro.tsx) needs to know regardless of whether
+          that resolution was a real page or not, or its idle loop would spin
+          forever for a first-time visitor whose very first address happens
+          to hit one of these. */}
+      <PageArrivedSignal />
       <p className="font-serif text-lg italic text-neutral-400">
         {PLACEHOLDER_COPY[variant]}
       </p>
