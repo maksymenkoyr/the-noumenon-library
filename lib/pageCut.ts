@@ -35,20 +35,24 @@ export interface EndingOption {
 
 /**
  * `cut-hard` and `cut-soft` both render as a *full* page that breaks off; they
- * differ only in how jagged the bottom edge is. Together they are 85% of the
- * library.
+ * differ only in how jagged the bottom edge is. Together they are 95% of the
+ * library — about a real novel's ratio, where a short page means a chapter
+ * ended.
  *
- * `complete` is held deliberately low. It is the one ending where the model
- * chooses its own stopping point, and left to itself it writes a self-contained
- * literary vignette that wraps itself up — the exact default register the
- * entropy dials exist to push against. It is kept at all because a real book
- * does have short pages (a chapter close, a poem), and because a wander of
- * nothing but severed pages has no rhythm.
+ * `complete` is held deliberately low, and went 15% → 5% once the split could
+ * be seen in real output. It is the one ending where the model chooses its own
+ * stopping point, and left to itself it writes a self-contained literary
+ * vignette that wraps itself up — the exact default register the entropy dials
+ * exist to push against. It is kept at all because a real book does have short
+ * pages (a chapter close, a poem), because it is the last thing holding up the
+ * "single resonant line in a field of white" case in
+ * docs/reference/experience.md, and because a wander with no change of rhythm
+ * at all is worse than one with a rare change of rhythm.
  */
 export const ENDINGS: readonly EndingOption[] = [
-  { id: "cut-hard", weight: 60 },
+  { id: "cut-hard", weight: 70 },
   { id: "cut-soft", weight: 25 },
-  { id: "complete", weight: 15 },
+  { id: "complete", weight: 5 },
 ];
 
 /** Weighted draw from the ending pool, off the caller's seeded stream. */

@@ -13,10 +13,10 @@
  * instruction to *end*. That produced pages that finished early and wrapped
  * themselves up, which is a short story, not a page of a book.
  *
- * The bar is now fullness, on 85% of pages. A page is cut off by the edge of
+ * The bar is now fullness, on 95% of pages. A page is cut off by the edge of
  * the paper (lib/pageCut.ts) rather than finished, so leftover whitespace
  * usually means a generation that came up short — `inputs.cut === false` marks
- * exactly those. The old case survives as the `complete` ending, held to 15%:
+ * exactly those. The old case survives as the `complete` ending, held to 5%:
  * a real book does have short pages, and a wander of nothing but severed ones
  * has no rhythm.
  */

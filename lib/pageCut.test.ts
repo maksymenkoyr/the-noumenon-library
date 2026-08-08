@@ -138,14 +138,15 @@ describe("applyEnding", () => {
 });
 
 describe("pickEnding", () => {
-  it("keeps the library 85% full pages", () => {
+  it("keeps the library 95% full pages", () => {
     const total = ENDINGS.reduce((sum, o) => sum + o.weight, 0);
     const complete = ENDINGS.find((o) => o.id === "complete")!;
     // `complete` is the only ending where the model picks its own stopping
     // point — and left to itself it writes the self-contained vignette the
-    // entropy dials exist to push against. It stays the minority.
-    expect(complete.weight / total).toBeCloseTo(0.15);
-    expect(1 - complete.weight / total).toBeCloseTo(0.85);
+    // entropy dials exist to push against. One page in twenty, not one in
+    // seven: about what a real novel gives a chapter-ending page.
+    expect(complete.weight / total).toBeCloseTo(0.05);
+    expect(1 - complete.weight / total).toBeCloseTo(0.95);
   });
 
   it("draws every ending given enough samples, and is deterministic", () => {
