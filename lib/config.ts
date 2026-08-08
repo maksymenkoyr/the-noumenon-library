@@ -116,19 +116,24 @@ export const config = {
     ? process.env.MODERATION_ENABLED === "true"
     : true,
   // Generation entropy levers (docs/reference/generation.md, architecture.md §6).
+  // The *base* temperature is not an env var: it comes from the chosen model's
+  // model_registry row (lib/registry.ts), so each pool member can run at its own
+  // setting. Change it with SQL — `UPDATE model_registry SET temperature = …
+  // WHERE task = 'generation'` — which survives db:migrate, since the schema.sql
+  // seed is ON CONFLICT DO NOTHING.
   //
-  // The *base* temperature is NOT here — it lives per row in
-  // `model_registry.temperature` and is read by lib/registry.ts, so it retunes
-  // with a SQL UPDATE and no deploy. (A dead `GENERATION_TEMPERATURE` env knob
-  // used to sit at this spot; nothing ever read it, and it read as the obvious
-  // place to crank entropy. Removed rather than left as a trap.)
+  // This is the only env-side temperature knob: the per-page jitter. The actual
+  // temperature is that row's base ± a uniform draw up to this magnitude,
+  // clamped to a sane range (lib/generate.ts jitteredTemperature), and logged
+  // per page as provenance. A model-agnostic variety lever that works even when
+  // generation is pinned to a single model. 0 = off.
   //
-  // Per-page temperature jitter: the actual temperature is that registry base ±
-  // a uniform draw up to this magnitude, clamped to [0.1, 2] in lib/generate.ts.
-  // A model-agnostic variety lever that works even when generation is pinned to
-  // a single model. 0 = off. Widened 0.2 → 0.4 so a hot base explores a real
-  // range rather than a narrow band.
-  temperatureJitter: nonNegative("GENERATION_TEMPERATURE_JITTER", 0.4),
+  // The entropy work on this branch briefly ran this at 0.4, on the theory that
+  // a hot base should explore a real range. #26 narrowed it to 0.1 instead, and
+  // that decision stands: the page-ending and gallery-seed levers turned out to
+  // move the distribution far more than temperature does, so the wide band was
+  // buying noise rather than variety.
+  temperatureJitter: nonNegative("GENERATION_TEMPERATURE_JITTER", 0.1),
   // Page-size constraint (docs/reference/generation.md), stated in the
   // prompt. The per-call token cap for generation/moderation comes from the
   // chosen model_registry row's max_tokens (lib/registry.ts).

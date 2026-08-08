@@ -13,6 +13,10 @@ import { config } from "./config";
  * the platform — is the durable record of what went wrong. Events fired today:
  *   - `db_query_failed` (lib/db.ts) — a Postgres query threw. The
  *     charter-critical signal: the precious store may be unreachable (§9).
+ *     Carries `op`, the `"<module>.<function>"` label of the calling site.
+ *     Every query in the app funnels through the one wrapper, so without it a
+ *     safely-ignorable telemetry write (`modelStats.recordModelCall`) reads
+ *     identically to a lost page commit (`store.commitPage`).
  *   - `generation_failed` (lib/resolvePage.ts) — a resolvePage attempt threw
  *     (provider error, persistent reject, or commit failure); address stays dark.
  *   - `commit_lost` (lib/resolvePage.ts) — a generated page failed to persist.

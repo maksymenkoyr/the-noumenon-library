@@ -134,9 +134,11 @@ export interface PromptContext {
   // Set for the `complete` ending only (lib/pageCut.ts): the text is asked to
   // reach its own end at roughly this length instead of overshooting the page.
   completeWords?: number;
-  // Sampled constraint sentences (GENERATION_CONSTRAINTS), appended in order.
-  // Facts about the text, never orders to a writer. Empty when nothing fired.
-  constraints?: readonly string[];
+  // Sampled constraints (GENERATION_CONSTRAINTS), appended in order. Facts
+  // about the text, never orders to a writer. Empty when nothing fired. Passed
+  // whole rather than as bare sentences so each keeps its id and probability
+  // for the dev overlay's segment view.
+  constraints?: readonly PromptConstraint[];
   // One association term drawn from the page's *gallery* (lib/gallerySeeds.ts),
   // stable across every page of a volume. Undefined when the gallery has no
   // stored terms yet or the association call failed — the prompt then simply
@@ -144,7 +146,28 @@ export interface PromptContext {
   seedTerm?: string;
 }
 
-type PromptBuilder = (ctx: PromptContext) => string;
+/**
+ * One labeled piece of an assembled prompt. Builders emit segments rather than
+ * a finished string so the dev overlay (app/[[...address]]/dev-badge) can show
+ * *which* part is which — a glued-together blob hides whether a constraint
+ * fired at all. `buildPrompt` joins them back into the exact string sent as the
+ * user message, so the segmentation is a view onto the prompt, never a change
+ * to it.
+ */
+export interface PromptSegment {
+  // "length", "start", "no-ellipsis", "seed", or a GENERATION_CONSTRAINTS id.
+  id: string;
+  // The text exactly as it appears in the assembled prompt.
+  text: string;
+  // How this segment attaches to the one before it when joined: its own
+  // paragraph, or another sentence in the running one.
+  join: "paragraph" | "sentence";
+  // Sampling probability, on constraint segments only — the dial's setting,
+  // shown alongside the id in the overlay.
+  probability?: number;
+}
+
+type PromptBuilder = (ctx: PromptContext) => PromptSegment[];
 
 export interface PromptConstraint {
   id: string; // short slug, logged as a prompt_variant suffix
@@ -218,35 +241,83 @@ const VARIANTS: Record<string, PromptBuilder> = {
     completeWords,
     constraints = [],
     seedTerm,
-  }) =>
-    [
+  }) => [
+    {
       // `complete` asks for a finished text at its own length; every other
       // ending asks for more than the page holds and is cut down to it
       // (lib/pageCut.ts). Either way the number is a target the model will
       // miss — which is exactly why it is no longer load-bearing.
-      completeWords
+      id: "length",
+      join: "paragraph",
+      text: completeWords
         ? `Generate about ${completeWords} words of text, complete in itself.`
         : `Generate about ${Math.round(pageWords * OVERSHOOT)} words of text.`,
-      `It begins ${start}.`,
+    },
+    {
+      id: "start",
+      join: "sentence",
+      text: `It begins ${start}.`,
+    },
+    {
       // Unprompted, the model marks the seam with a leading `…` — a narrator
       // saying "excerpt". The seam is the paper's, not the text's.
-      "The opening is not marked with an ellipsis.",
-      // The gallery's association term. Deliberately loose ("something in it
-      // has to do with"): a bare noun stated as the subject turns the text into
-      // an encyclopedia entry about it.
-      ...(seedTerm ? [`Something in it has to do with ${seedTerm}.`] : []),
-      ...constraints,
-    ].join(" "),
+      id: "no-ellipsis",
+      join: "sentence",
+      text: "The opening is not marked with an ellipsis.",
+    },
+    // The gallery's association term. Deliberately loose ("something in it has
+    // to do with"): a bare noun stated as the subject turns the text into an
+    // encyclopedia entry about it.
+    ...(seedTerm
+      ? [
+          {
+            id: "seed",
+            join: "sentence" as const,
+            text: `Something in it has to do with ${seedTerm}.`,
+          },
+        ]
+      : []),
+    // Constraints ride as further sentences of the same running paragraph.
+    ...constraints.map((c) => ({
+      id: c.id,
+      join: "sentence" as const,
+      text: c.text,
+      probability: c.probability,
+    })),
+  ],
 };
 
 export const DEFAULT_PROMPT_VARIANT = "base-v3";
 
 export const PROMPT_VARIANT_IDS = Object.keys(VARIANTS);
 
-export function buildPrompt(variantId: string, ctx: PromptContext): string {
+/**
+ * The prompt as its labeled parts (dev-overlay provenance). The segments are
+ * the primitive; `buildPrompt` below is their concatenation, so the two can
+ * never disagree about what was sent.
+ */
+export function buildPromptSegments(
+  variantId: string,
+  ctx: PromptContext,
+): PromptSegment[] {
   const builder = VARIANTS[variantId];
   if (!builder) {
     throw new Error(`Unknown prompt variant: ${variantId}`);
   }
   return builder(ctx);
+}
+
+/**
+ * Assemble segments into the exact string sent as the user message: a
+ * `paragraph` segment opens a new one (blank line between), a `sentence`
+ * segment continues the running paragraph.
+ */
+export function joinSegments(segments: readonly PromptSegment[]): string {
+  return segments
+    .map((seg, i) => (i === 0 ? seg.text : (seg.join === "paragraph" ? "\n\n" : " ") + seg.text))
+    .join("");
+}
+
+export function buildPrompt(variantId: string, ctx: PromptContext): string {
+  return joinSegments(buildPromptSegments(variantId, ctx));
 }

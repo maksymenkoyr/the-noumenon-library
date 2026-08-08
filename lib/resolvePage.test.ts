@@ -26,6 +26,10 @@ vi.mock("./pipeline", () => ({
         promptVariant: "base-v1",
         constraints: [],
         prompt: `prompt for ${address}`,
+        promptSegments: [
+          { id: "framing", text: `prompt for ${address}`, join: "paragraph" as const },
+        ],
+        maxTokens: 1000,
         moderationModel: "mod-model",
         generationMs: 500,
         moderationMs: 50,
@@ -102,8 +106,15 @@ describe("resolvePage lifecycle", () => {
     expect(second.moderationMs).toBe(50);
     expect(second.moderationModel).toBe("mod-model");
     expect(second.prompt).toBe("prompt for b/1/1/1/1");
+    // Segments survive the JSONB round-trip, so a revisit gets the same
+    // structured panel a fresh generation does rather than the flat fallback.
+    expect(second.promptSegments).toEqual([
+      { id: "framing", text: "prompt for b/1/1/1/1", join: "paragraph" },
+    ]);
     expect(second.promptVariant).toBe("base-v1");
     expect(second.temperature).toBe(0.9);
+    expect(second.provider).toBe("openrouter");
+    expect(second.maxTokens).toBe(1000);
     expect(generateMock).toHaveBeenCalledTimes(1);
   });
 
@@ -116,6 +127,7 @@ describe("resolvePage lifecycle", () => {
     const page = await resolvePage("legacy/1/1/1/1");
     expect(page).toMatchObject({ status: "ok", text: "old content", model: "old-model" });
     expect(page.prompt).toBeUndefined();
+    expect(page.promptSegments).toBeUndefined();
     expect(page.promptVariant).toBeUndefined();
     expect(page.temperature).toBeUndefined();
     expect(page.generationMs).toBeUndefined();

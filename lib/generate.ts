@@ -19,11 +19,13 @@ import {
 import { pickTerm, termsForGallery } from "./gallerySeeds";
 import { pickEnding, type Ending } from "./pageCut";
 import {
-  buildPrompt,
+  buildPromptSegments,
   DEFAULT_PROMPT_VARIANT,
   GENERATION_CONSTRAINTS,
+  joinSegments,
   pickStartSeam,
   type PromptConstraint,
+  type PromptSegment,
   type StartSeam,
 } from "./prompts";
 import { chooseGenerationModel, markCooling, markHealthy, markUnavailable, poolFor } from "./registry";
@@ -190,11 +192,17 @@ export interface GenerationResult {
   model: string;
   provider: Provider;
   usage: GenerationUsage;
-  // The exact assembled prompt this generation sent as its user message —
-  // dev-overlay provenance (lib/devMode, app/[[...address]]/dev-badge), not
-  // persisted. Identical across every fallback attempt in one call (only the
-  // model/provider vary), so it's safe to surface once per result.
+  // The exact assembled prompt this generation sent as its user message, and
+  // the labeled parts it was assembled from (lib/prompts.ts) — dev-overlay
+  // provenance (lib/devMode, app/[[...address]]/dev-badge). Identical across
+  // every fallback attempt in one call (only the model/provider vary), so
+  // they're safe to surface once per result.
   prompt: string;
+  promptSegments: PromptSegment[];
+  // The token ceiling the answering attempt actually ran under — a pool
+  // fallback carries its own registry row's limit, so this need not be the
+  // `maxTokens` the levers asked for.
+  maxTokens: number;
   // Wall time of the one attempt that actually answered — excludes any
   // earlier failed fallback attempts, so this is generation time proper, not
   // padded by retries against dead models.
@@ -254,14 +262,14 @@ interface Attempt {
 export async function generatePage(
   levers: GenerationLevers,
 ): Promise<GenerationResult> {
-  const constraintTexts = levers.constraints.map((c) => c.text);
-  const prompt = buildPrompt(levers.promptVariant, {
+  const promptSegments = buildPromptSegments(levers.promptVariant, {
     pageWords: levers.pageWords,
     start: levers.startPhrase,
     completeWords: levers.completeWords,
-    constraints: constraintTexts,
+    constraints: levers.constraints,
     seedTerm: levers.seedTerm,
   });
+  const prompt = joinSegments(promptSegments);
   // Full-prompt dev logging (docs/reference/generation.md): chooseLevers()
   // above already logs the levers; this logs the exact string sent as the
   // user message, for prompt iteration.
@@ -330,6 +338,8 @@ export async function generatePage(
         provider: attempt.provider,
         usage: { tokens, costUsd },
         prompt,
+        promptSegments,
+        maxTokens: attempt.maxTokens,
         durationMs,
       };
     } catch (err) {

@@ -64,6 +64,7 @@ export async function poolFor(task: Task): Promise<RegistryRow[]> {
        AND health <> 'unavailable'
        AND (health <> 'cooling' OR cooling_until <= now())`,
     [task],
+    "registry.poolFor",
   );
   return rows.map(fromDbRow).filter((row) => providerAvailable(row.provider));
 }
@@ -160,6 +161,7 @@ export async function markCooling(slug: string, task: Task, until: Date): Promis
       `UPDATE model_registry SET health = 'cooling', cooling_until = $3
        WHERE slug = $1 AND task = $2`,
       [slug, task, until],
+      "registry.markCooling",
     );
   } catch (err) {
     devLog(
@@ -182,6 +184,7 @@ export async function markUnavailable(slug: string, task: Task): Promise<void> {
        WHERE slug = $1 AND task = $2
        RETURNING provider`,
       [slug, task],
+      "registry.markUnavailable",
     );
     await monitor("model_unavailable", { slug, task, provider: rows[0]?.provider });
   } catch (err) {
@@ -206,6 +209,7 @@ export async function markHealthy(slug: string, task: Task): Promise<void> {
       `UPDATE model_registry SET health = 'ok', cooling_until = NULL
        WHERE slug = $1 AND task = $2 AND health = 'cooling'`,
       [slug, task],
+      "registry.markHealthy",
     );
   } catch (err) {
     devLog(

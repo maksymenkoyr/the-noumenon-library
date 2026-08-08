@@ -6,6 +6,8 @@ import {
   PROMPT_VARIANT_IDS,
   START_SEAMS,
   buildPrompt,
+  buildPromptSegments,
+  joinSegments,
   pickStartSeam,
 } from "./prompts";
 
@@ -28,7 +30,7 @@ describe("buildPrompt", () => {
     const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, {
       ...ctx,
       seedTerm: "oak bark",
-      constraints: GENERATION_CONSTRAINTS.map((c) => c.text),
+      constraints: GENERATION_CONSTRAINTS,
     });
     expect(prompt).not.toMatch(/runs out of room|it ends|and ends|stops mid/i);
   });
@@ -55,7 +57,7 @@ describe("buildPrompt", () => {
     const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, {
       ...ctx,
       seedTerm: "oak bark",
-      constraints: GENERATION_CONSTRAINTS.map((c) => c.text),
+      constraints: GENERATION_CONSTRAINTS,
     });
     expect(prompt).not.toMatch(/coordinate/i);
     expect(prompt).not.toMatch(/\b[a-z0-9-]+\/\d+\/\d+\/\d+\/\d+\b/);
@@ -82,18 +84,21 @@ describe("buildPrompt", () => {
   });
 
   it("appends sampled constraints, and omits the slot when none fired", () => {
-    const constraints = GENERATION_CONSTRAINTS.map((c) => c.text);
-    const withConstraints = buildPrompt(DEFAULT_PROMPT_VARIANT, { ...ctx, constraints });
-    for (const text of constraints) expect(withConstraints).toContain(text);
+    const texts = GENERATION_CONSTRAINTS.map((c) => c.text);
+    const withConstraints = buildPrompt(DEFAULT_PROMPT_VARIANT, {
+      ...ctx,
+      constraints: GENERATION_CONSTRAINTS,
+    });
+    for (const text of texts) expect(withConstraints).toContain(text);
     // Constraints follow the parameter sentences. Anchor on text that actually
     // exists — a missing anchor makes indexOf return -1 and the comparison
     // passes vacuously.
     const edges = withConstraints.indexOf("It begins");
     expect(edges).toBeGreaterThan(-1);
-    expect(withConstraints.indexOf(constraints[0])).toBeGreaterThan(edges);
+    expect(withConstraints.indexOf(texts[0])).toBeGreaterThan(edges);
 
     const without = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
-    for (const text of constraints) expect(without).not.toContain(text);
+    for (const text of texts) expect(without).not.toContain(text);
     expect(without).not.toMatch(/ {2,}/);
   });
 
@@ -137,6 +142,61 @@ describe("buildPrompt", () => {
 
   it("throws on an unknown variant", () => {
     expect(() => buildPrompt("does-not-exist", ctx)).toThrow(/unknown prompt variant/i);
+    expect(() => buildPromptSegments("does-not-exist", ctx)).toThrow(/unknown prompt variant/i);
+  });
+});
+
+describe("buildPromptSegments", () => {
+  const withAll = { ...ctx, constraints: GENERATION_CONSTRAINTS, seedTerm: "oak bark" };
+
+  it("joins back into exactly the prompt that is sent", () => {
+    // The segmentation is a view onto the prompt, never a change to it: the
+    // dev overlay shows the parts, the model still gets this string.
+    for (const c of [ctx, withAll]) {
+      expect(joinSegments(buildPromptSegments(DEFAULT_PROMPT_VARIANT, c))).toBe(
+        buildPrompt(DEFAULT_PROMPT_VARIANT, c),
+      );
+    }
+    // base-v3 is a single running paragraph — the framing paragraph that used
+    // to open base-v1 went with the endless-library premise — so every segment
+    // after the first joins as another sentence.
+    const segments = buildPromptSegments(DEFAULT_PROMPT_VARIANT, withAll);
+    expect(segments[0].join).toBe("paragraph");
+    for (const seg of segments.slice(1)) expect(seg.join).toBe("sentence");
+    expect(buildPrompt(DEFAULT_PROMPT_VARIANT, withAll)).toBe(
+      segments.map((s) => s.text).join(" "),
+    );
+  });
+
+  it("labels every part, and carries each constraint's dial setting", () => {
+    expect(buildPromptSegments(DEFAULT_PROMPT_VARIANT, withAll).map((s) => s.id)).toEqual([
+      "length",
+      "start",
+      "no-ellipsis",
+      "seed",
+      ...GENERATION_CONSTRAINTS.map((c) => c.id),
+    ]);
+    for (const seg of buildPromptSegments(DEFAULT_PROMPT_VARIANT, withAll)) {
+      const constraint = GENERATION_CONSTRAINTS.find((c) => c.id === seg.id);
+      expect(seg.probability).toBe(constraint?.probability);
+    }
+  });
+
+  it("emits only the always-on parts when nothing else fired", () => {
+    // No constraint sampled and no gallery term: length, start, no-ellipsis.
+    expect(buildPromptSegments(DEFAULT_PROMPT_VARIANT, ctx).map((s) => s.id)).toEqual([
+      "length",
+      "start",
+      "no-ellipsis",
+    ]);
+  });
+
+  it("names the length segment the same whichever ending drew it", () => {
+    // `complete` swaps the overshoot target for a finished-text one, but the
+    // dev overlay must still find it under the same id.
+    const complete = buildPromptSegments(DEFAULT_PROMPT_VARIANT, { ...ctx, completeWords: 60 });
+    expect(complete[0].id).toBe("length");
+    expect(complete[0].text).toContain("complete in itself");
   });
 });
 

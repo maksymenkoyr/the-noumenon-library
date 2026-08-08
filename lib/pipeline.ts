@@ -8,6 +8,7 @@ import {
 import { moderate, type ModerationResult } from "./moderate";
 import { monitor } from "./monitor";
 import { applyEnding } from "./pageCut";
+import type { PromptSegment } from "./prompts";
 import { contentExistsElsewhere, hashContent, type PageInputs } from "./store";
 
 /**
@@ -19,6 +20,10 @@ import { contentExistsElsewhere, hashContent, type PageInputs } from "./store";
 interface Attempt {
   text: string;
   prompt: string;
+  // The labeled parts `prompt` was assembled from (lib/prompts.ts), carried
+  // alongside it so the dev overlay describes the committed attempt rather
+  // than the last one that ran.
+  promptSegments: PromptSegment[];
   words: number;
   cut: boolean;
 }
@@ -60,6 +65,7 @@ function inputsFrom(
     model: levers.model,
     provider: levers.provider,
     temperature: levers.temperature,
+    maxTokens: levers.maxTokens,
     // Applied constraints ride as `+id` suffixes (e.g. `base-v1+no-library`).
     promptVariant: provenanceVariant(levers),
     constraints: levers.constraints.map((c) => c.id),
@@ -76,6 +82,7 @@ function inputsFrom(
     actualWords: attempt.words,
     cut: attempt.cut,
     prompt,
+    promptSegments: attempt.promptSegments,
     moderationModel,
     generationMs,
     moderationMs,
@@ -89,9 +96,10 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   let moderationMs = 0;
   // Runs generation for the given levers, folds in usage and generation
   // time, and — since generatePage() may fall back to a different pool
-  // model on a retryable error — updates `levers.model`/`levers.provider` in
-  // place so provenance always names the model that actually produced the
-  // content, not just the one requested. Also returns the exact prompt sent,
+  // model on a retryable error — updates `levers.model`/`levers.provider`/
+  // `levers.maxTokens` in place so provenance always names the model that
+  // actually produced the content (and the ceiling it ran under), not just the
+  // one requested. Also returns the exact prompt sent and its labeled parts,
   // for the caller to track alongside content (dev-overlay provenance).
   //
   // The drawn ending is applied *here*, before anything else sees the text:
@@ -104,8 +112,15 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
     generationMs += result.durationMs;
     l.model = result.model;
     l.provider = result.provider;
+    l.maxTokens = result.maxTokens;
     const cut = applyEnding(result.text, l.ending, l.pageWords);
-    return { text: cut.text, prompt: result.prompt, words: cut.words, cut: cut.cut };
+    return {
+      text: cut.text,
+      prompt: result.prompt,
+      promptSegments: result.promptSegments,
+      words: cut.words,
+      cut: cut.cut,
+    };
   };
   // Runs moderation and folds in its wall time, kept separate from generation
   // time above (dev-overlay provenance — see PipelineResult). Returns the full

@@ -87,7 +87,11 @@ export function PlaceholderPage({
         {PLACEHOLDER_COPY[variant]}
       </p>
       {variant === "explore" && (
-        // Plain anchor: random must re-resolve server-side on every click.
+        // A full load to `/`, where the server picks the address. Unlike
+        // nav.tsx's `random` this stays a plain anchor: it is the one link in
+        // a server component, and this variant is shown when generation is
+        // capped — the ask is to slow down, so a snappy client-side wander
+        // would be working against the copy.
         // eslint-disable-next-line @next/next/no-html-link-for-pages
         <a
           href="/"

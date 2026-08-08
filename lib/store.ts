@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { config } from "./config";
 import { query } from "./db";
+import type { PromptSegment } from "./prompts";
 import type { Provider } from "./providers";
 
 /**
@@ -44,6 +45,7 @@ export interface PageInputs {
   promptVariant?: string;
   // Applied constraint ids (unsuffixed), for structured querying.
   constraints?: string[];
+
   // The gallery association term this volume was built around
   // (lib/gallerySeeds.ts). Projected to the pages.seed_word column rather than
   // suffixed onto promptVariant: term cardinality is unbounded, and suffixing
@@ -66,8 +68,14 @@ export interface PageInputs {
   // model returned less than a page and there was nothing to trim.
   actualWords?: number;
   cut?: boolean;
-  // The exact prompt sent for whichever attempt ended up committed.
+  // The exact prompt sent for whichever attempt ended up committed, plus the
+  // labeled parts it was assembled from (lib/prompts.ts) — the dev overlay
+  // renders the parts and falls back to the flat string for rows committed
+  // before segments were tracked. Additive in JSONB, so no migration.
   prompt?: string;
+  promptSegments?: PromptSegment[];
+  // The token ceiling the committed generation ran under.
+  maxTokens?: number;
   // The chain link that passed the committed content (lib/moderate.ts).
   moderationModel?: string;
   generationMs?: number;
@@ -90,6 +98,7 @@ export async function contentExistsElsewhere(
   const rows = await query(
     "SELECT 1 FROM pages WHERE content_hash = $1 AND address <> $2 LIMIT 1",
     [contentHash, address],
+    "store.contentExistsElsewhere",
   );
   return rows.length > 0;
 }
@@ -98,6 +107,7 @@ export async function getPage(address: string): Promise<PageRow | null> {
   const rows = await query<PageRow>(
     "SELECT * FROM pages WHERE address = $1",
     [address],
+    "store.getPage",
   );
   return rows[0] ?? null;
 }
@@ -113,6 +123,7 @@ export async function reservePage(address: string): Promise<boolean> {
      ON CONFLICT (address) DO NOTHING
      RETURNING address`,
     [address],
+    "store.reservePage",
   );
   return rows.length > 0;
 }
@@ -133,6 +144,7 @@ export async function reclaimStaleReservation(
        AND created_at < now() - make_interval(secs => $2)
      RETURNING address`,
     [address, config.staleReservationSeconds],
+    "store.reclaimStaleReservation",
   );
   return rows.length > 0;
 }
@@ -176,6 +188,7 @@ export async function commitPage(
       inputs.seedWord ?? null,
       JSON.stringify(inputs),
     ],
+    "store.commitPage",
   );
   return rows.length > 0;
 }
@@ -195,6 +208,7 @@ export async function takeDownPage(address: string): Promise<void> {
        content_hash = NULL,
        committed_at = now()`,
     [address],
+    "store.takeDownPage",
   );
 }
 
@@ -207,6 +221,7 @@ export async function releaseReservation(address: string): Promise<void> {
   await query(
     "DELETE FROM pages WHERE address = $1 AND status = 'generating'",
     [address],
+    "store.releaseReservation",
   );
 }
 
