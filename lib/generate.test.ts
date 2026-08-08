@@ -14,6 +14,16 @@ vi.mock("./providers", async () => {
   return { ...actual, getClient: () => ({ chat: { completions: { create: createMock } } }) };
 });
 
+// chooseLevers asks the gallery for its association terms. Stub the network
+// call and control the term list, so the seed lever can be asserted here
+// without a provider (its own behavior lives in lib/gallerySeeds.test.ts).
+const SEED_TERMS = ["bavaria", "roundel", "welding", "sediment", "oak bark"];
+vi.mock("./gallerySeeds", async () => {
+  const actual =
+    await vi.importActual<typeof import("./gallerySeeds")>("./gallerySeeds");
+  return { ...actual, termsForGallery: vi.fn(async () => SEED_TERMS) };
+});
+
 import { config } from "./config";
 import { closePool, query } from "./db";
 import {
@@ -35,7 +45,11 @@ const levers: GenerationLevers = {
   provider: "openrouter",
   temperature: 0.9,
   maxTokens: 1000,
-  promptVariant: "base-v1",
+  pageWords: 200,
+  start: "mid-sentence",
+  startPhrase: "mid-sentence",
+  ending: "cut-hard",
+  promptVariant: "base-v3",
   constraints: [],
 };
 
@@ -156,7 +170,9 @@ describe("generatePage fallback", () => {
     const result = await generatePage(levers);
 
     const expectedPrompt = buildPrompt(levers.promptVariant, {
-      maxWords: config.pageMaxWords,
+      pageWords: levers.pageWords,
+      start: levers.startPhrase,
+      completeWords: levers.completeWords,
       constraints: [],
     });
     expect(result.prompt).toBe(expectedPrompt);
@@ -164,7 +180,14 @@ describe("generatePage fallback", () => {
       messages: [{ role: "user", content: expectedPrompt }],
     });
     // The same prompt, also carried as its labeled parts for the dev overlay.
-    expect(result.promptSegments.map((s) => s.id)).toEqual(["framing", "length"]);
+    // No constraints fired and this fixture has no gallery term, so only the
+    // always-on parts appear (base-v3 has no "framing" — that went with the
+    // endless-library premise).
+    expect(result.promptSegments.map((s) => s.id)).toEqual([
+      "length",
+      "start",
+      "no-ellipsis",
+    ]);
     expect(joinSegments(result.promptSegments)).toBe(expectedPrompt);
   });
 
@@ -234,9 +257,9 @@ describe("chooseLevers", () => {
     }
   });
 
-  it("defaults to base-v1", async () => {
+  it("defaults to base-v3", async () => {
     const result = await chooseLevers("addr");
-    expect(result.promptVariant).toBe("base-v1");
+    expect(result.promptVariant).toBe("base-v3");
   });
 
   it("is a reproducible function of the address (same seed → same levers)", async () => {
@@ -256,18 +279,113 @@ describe("chooseLevers", () => {
 
   it("samples constraints from the seed — deterministic, and address-dependent", async () => {
     // Across many addresses the constraint both fires and doesn't, proving it
-    // is sampled (not always-on/off) and driven by the seed.
+    // is sampled (not always-on/off) and driven by the seed. Every dial now
+    // sits at 0.15, so 200 draws makes "never fires" vanishingly unlikely
+    // (0.85^200) without pinning the test to a specific probability.
     const fired = new Set<boolean>();
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 200; i++) {
       const levers = await chooseLevers(`addr-${i}`);
-      fired.add(levers.constraints.some((c) => c.id === "no-library"));
+      fired.add(levers.constraints.some((c) => c.id === "no-persons"));
     }
     expect(fired).toEqual(new Set([true, false]));
 
     // Whatever fired is reflected in the provenance variant suffix.
     const one = await chooseLevers("addr-0");
-    const expected = "base-v1" + one.constraints.map((c) => `+${c.id}`).join("");
+    const expected = "base-v3" + one.constraints.map((c) => `+${c.id}`).join("");
     expect(provenanceVariant(one)).toBe(expected);
     expect(GENERATION_CONSTRAINTS.length).toBeGreaterThan(0);
+  });
+
+  it("gives every page in the library the same page size", async () => {
+    // Page size is deliberately NOT a lever. It was briefly drawn per page
+    // from a range, which is incoherent with the object being simulated: a
+    // book does not change page size depending on where you open it, and the
+    // ending only reads as "cut off" if the cut always falls in one place.
+    const seen = new Set<number>();
+    for (let i = 0; i < 50; i++) {
+      seen.add((await chooseLevers(`g/1/1/1/${i + 1}`)).pageWords);
+    }
+    expect([...seen]).toEqual([config.pageWords]);
+  });
+
+  it("gives every page of a volume the same seed term", async () => {
+    const first = await chooseLevers("bmw89/3/2/17/1");
+    const middle = await chooseLevers("bmw89/3/2/17/206");
+    const last = await chooseLevers("bmw89/3/2/17/410");
+    expect(SEED_TERMS).toContain(first.seedTerm);
+    expect(middle.seedTerm).toBe(first.seedTerm);
+    expect(last.seedTerm).toBe(first.seedTerm);
+    // ...while the page-seeded levers still vary across those same pages.
+    // Temperature is the proxy: a continuous draw, so unlike the four-valued
+    // edge seams it effectively never collides by chance.
+    expect(middle.temperature).not.toBe(first.temperature);
+  });
+
+  it("keeps the volume's seed term across a regeneration attempt", async () => {
+    // A moderation/dedup retry redraws every page-seeded lever, but the book
+    // it belongs to must not change subject mid-volume.
+    const first = await chooseLevers("bmw89/3/2/17/1", 0);
+    const retry = await chooseLevers("bmw89/3/2/17/1", 1);
+    expect(retry.seedTerm).toBe(first.seedTerm);
+    expect(retry.temperature).not.toBe(first.temperature);
+  });
+
+  it("draws start and ending independently, and reproducibly", async () => {
+    const pairs = new Set<string>();
+    const starts = new Set<string>();
+    const endings = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const l = await chooseLevers(`g/1/1/1/${i + 1}`);
+      pairs.add(`${l.start}>${l.ending}`);
+      starts.add(l.start);
+      endings.add(l.ending);
+    }
+    // All four start seams and all three endings reachable...
+    expect(starts.size).toBe(4);
+    expect(endings.size).toBe(3);
+    // ...and independent, so the pair space is wider than either alone. A
+    // page's top edge has nothing to do with how it stops.
+    expect(pairs.size).toBeGreaterThan(4);
+
+    const a = await chooseLevers("gallery/1/2/3/4");
+    const b = await chooseLevers("gallery/1/2/3/4");
+    expect(b.start).toBe(a.start);
+    expect(b.ending).toBe(a.ending);
+  });
+
+  it("draws a target length for `complete` and for nothing else", async () => {
+    // A "complete" text that overruns the page gets cut, which is the one
+    // outcome this ending exists to avoid — so its target sits well under one.
+    let sawComplete = false;
+    for (let i = 0; i < 200; i++) {
+      const l = await chooseLevers(`g/1/1/1/${i + 1}`);
+      if (l.ending === "complete") {
+        sawComplete = true;
+        expect(l.completeWords).toBeGreaterThan(0);
+        expect(l.completeWords!).toBeLessThan(config.pageWords * 0.6);
+      } else {
+        expect(l.completeWords).toBeUndefined();
+      }
+    }
+    expect(sawComplete).toBe(true);
+  });
+
+  it("puts the drawn start seam in the prompt, and never the ending", async () => {
+    const chosen = await chooseLevers("g/1/1/1/7");
+    createMock.mockResolvedValueOnce(completion("page text"));
+    const result = await generatePage(chosen);
+    expect(result.prompt).toContain(`It begins ${chosen.startPhrase}.`);
+    // The ending is applied to the returned text (lib/pageCut.ts), never asked
+    // for — a model given a word count to stop at misses it by 26-94%.
+    expect(result.prompt).not.toMatch(/cut-hard|cut-soft|runs out of room/);
+  });
+
+  it("puts the seed term in the prompt but never the address", async () => {
+    const chosen = await chooseLevers("bmw89/3/2/17/1");
+    createMock.mockResolvedValueOnce(completion("page text"));
+    const result = await generatePage(chosen);
+    expect(result.prompt).toContain(`has to do with ${chosen.seedTerm}`);
+    expect(result.prompt).not.toContain("bmw89");
+    expect(result.prompt).not.toMatch(/\b[a-z0-9-]+\/\d+\/\d+\/\d+\/\d+\b/);
   });
 });

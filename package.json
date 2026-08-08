@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
+    "seeds": "node --env-file=.env.local scripts/seeds.mjs",
     "takedown": "node --env-file=.env.local scripts/takedown.mjs",
     "invite": "node --env-file=.env.local scripts/invite.mjs",
     "backup": "node --env-file-if-exists=.env.local scripts/backup.mjs",

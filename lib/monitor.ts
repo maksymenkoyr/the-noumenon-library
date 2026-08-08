@@ -25,6 +25,9 @@ import { config } from "./config";
  *   - `moderation_disabled_in_production` (lib/moderate.ts) — the fail-closed
  *     guard found moderation off in a production deploy.
  *   - `model_unavailable` (lib/registry.ts) — a registered model can't be used.
+ *   - `gallery_seed_failed` (lib/gallerySeeds.ts) — a gallery's association
+ *     expansion failed. Not page-fatal: generation carries on unseeded and the
+ *     next visit to that gallery retries.
  *   - `page_reported` (app/api/report/route.ts) — a reader filed a report.
  *   - `report_email_failed` (lib/reportEmail.ts) — the report notification
  *     couldn't be delivered.

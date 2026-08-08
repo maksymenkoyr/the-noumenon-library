@@ -127,11 +127,29 @@ export const config = {
   // clamped to a sane range (lib/generate.ts jitteredTemperature), and logged
   // per page as provenance. A model-agnostic variety lever that works even when
   // generation is pinned to a single model. 0 = off.
+  //
+  // The entropy work on this branch briefly ran this at 0.4, on the theory that
+  // a hot base should explore a real range. #26 narrowed it to 0.1 instead, and
+  // that decision stands: the page-ending and gallery-seed levers turned out to
+  // move the distribution far more than temperature does, so the wide band was
+  // buying noise rather than variety.
   temperatureJitter: nonNegative("GENERATION_TEMPERATURE_JITTER", 0.1),
   // Page-size constraint (docs/reference/generation.md), stated in the
   // prompt. The per-call token cap for generation/moderation comes from the
   // chosen model_registry row's max_tokens (lib/registry.ts).
-  pageMaxWords: numeric("PAGE_MAX_WORDS", 400),
+  //
+  // One size for every page in the library — this is the paper, not a budget.
+  // It is never asked for in the prompt (models miss a stated word count by
+  // 26–94%); the model is asked for more than this and the text is cut down to
+  // it in lib/pageCut.ts, so a full page is exactly this many words.
+  //
+  // Sized to what the reading container actually holds, NOT the other way
+  // round: PAGE_HEIGHT is min-h-[44rem] over a 608px column of 18px Lora on
+  // 36px lines ≈ 19.5 lines, and blank lines between paragraphs eat several of
+  // those. 400 was inherited from when this was a "max" nobody enforced, and
+  // it overflowed the container by roughly 2× — the fixed-size page was a
+  // fiction. Retune this and PAGE_HEIGHT together, by eye, in a browser.
+  pageWords: numeric("PAGE_WORDS", 200),
   // Concurrency guard tunables (docs/reference/architecture.md §3). The stale window
   // must comfortably exceed worst-case generation time. Lowered 300 → 90 now
   // that reasoning is off on every call (§4 of the model-pool rework) — the

@@ -16,16 +16,20 @@ import {
   reasoningParams,
   type Provider,
 } from "./providers";
+import { pickTerm, termsForGallery } from "./gallerySeeds";
+import { pickEnding, type Ending } from "./pageCut";
 import {
   buildPromptSegments,
   DEFAULT_PROMPT_VARIANT,
   GENERATION_CONSTRAINTS,
   joinSegments,
+  pickStartSeam,
   type PromptConstraint,
   type PromptSegment,
+  type StartSeam,
 } from "./prompts";
 import { chooseGenerationModel, markCooling, markHealthy, markUnavailable, poolFor } from "./registry";
-import { attemptSeed, makeSeededRandom } from "./seededRandom";
+import { attemptSeed, makeSeededRandom, volumeSeed } from "./seededRandom";
 
 /**
  * Generation is a pure function of its levers plus model nondeterminism, and
@@ -44,10 +48,30 @@ export interface GenerationLevers {
   provider: Provider;
   temperature: number; // jittered around the chosen row's base temperature
   maxTokens: number; // the chosen row's max_tokens
+  // config.pageWords — the same on every page, so not a lever at all; carried
+  // here so provenance records the paper size a page was written to, which can
+  // change between deploys. Not the same thing as maxTokens: that is the hard
+  // provider cap, this is the size of the page.
+  pageWords: number;
+  // Which seam the page break lands on at the top. Prompt-side, because the
+  // model obeys it. The id is persisted; the phrase goes into the prompt.
+  start: StartSeam;
+  startPhrase: string;
+  // How the page stops (lib/pageCut.ts). Deliberately NOT in the prompt — it
+  // is applied to the returned text in lib/pipeline.ts, because a model asked
+  // to stop at a word count misses by 26–94%.
+  ending: Ending;
+  // Target length for the `complete` ending only, drawn well under a page so
+  // the model's own overshoot still lands inside it. Undefined otherwise.
+  completeWords?: number;
   promptVariant: string;
   // Dynamic constraints sampled for this page. Their ids ride into
   // provenance via provenanceVariant().
   constraints: readonly PromptConstraint[];
+  // The gallery association term this volume is built around
+  // (lib/gallerySeeds.ts), or undefined when the gallery has no stored terms.
+  // Persisted as pages.seed_word.
+  seedTerm?: string;
 }
 
 /** Fisher-Yates shuffle; does not mutate the input. */
@@ -109,14 +133,33 @@ export async function chooseLevers(
   const stats = await getModelStats();
   const chosen = await chooseGenerationModel(stats, rng);
   const promptVariant = DEFAULT_PROMPT_VARIANT;
-  // Fixed draw order (model above, then constraints, then temperature) so a
-  // given seed always maps to the same page.
+  // Fixed draw order (model above, then constraints, temperature, start,
+  // ending) so a given seed always maps to the same page. Append new draws at
+  // the END — inserting one mid-sequence reshuffles every lever after it.
   const constraints = sampleConstraints(rng);
   const temperature = jitteredTemperature(chosen.temperature, rng);
+  const start = pickStartSeam(rng);
+  const ending = pickEnding(rng);
+  // Drawn only for `complete`, and deliberately far under a page: the model
+  // overshoots any stated count by up to ~94%, so asking for much more than
+  // half a page would produce a "complete" text that overruns the paper and
+  // gets cut anyway — which is the one outcome this ending exists to avoid.
+  const completeWords =
+    ending.id === "complete"
+      ? Math.round(config.pageWords * (0.2 + rng() * 0.35))
+      : undefined;
+  // Drawn from a separate, volume-scoped stream (lib/seededRandom.ts
+  // volumeSeed) rather than the page stream above: the subject must hold
+  // across all 410 pages of a volume, and must survive a retry's redraw.
+  const terms = await termsForGallery(address.split("/")[0]);
+  const seedTerm = pickTerm(terms, makeSeededRandom(volumeSeed(address)));
   devLog(
     `generate address=${address} attempt=${attempt} model=${chosen.slug} ` +
       `provider=${chosen.provider} temp=${temperature.toFixed(2)} ` +
+      `pageWords=${config.pageWords} start=${start.id} ending=${ending.id} ` +
+      (completeWords ? `completeWords=${completeWords} ` : "") +
       `variant=${promptVariant}` +
+      (seedTerm ? ` seed=${seedTerm}` : "") +
       (constraints.length
         ? ` constraints=${constraints.map((c) => c.id).join(",")}`
         : ""),
@@ -126,8 +169,14 @@ export async function chooseLevers(
     provider: chosen.provider,
     temperature,
     maxTokens: chosen.maxTokens,
+    pageWords: config.pageWords,
+    start: start.id,
+    startPhrase: start.phrase,
+    ending: ending.id,
+    completeWords,
     promptVariant,
     constraints,
+    seedTerm,
   };
 }
 
@@ -214,8 +263,11 @@ export async function generatePage(
   levers: GenerationLevers,
 ): Promise<GenerationResult> {
   const promptSegments = buildPromptSegments(levers.promptVariant, {
-    maxWords: config.pageMaxWords,
+    pageWords: levers.pageWords,
+    start: levers.startPhrase,
+    completeWords: levers.completeWords,
     constraints: levers.constraints,
+    seedTerm: levers.seedTerm,
   });
   const prompt = joinSegments(promptSegments);
   // Full-prompt dev logging (docs/reference/generation.md): chooseLevers()

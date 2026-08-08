@@ -1,0 +1,96 @@
+<!doctype html>
+<!--
+  How many words actually fit on a page.
+
+  PAGE_WORDS (lib/config.ts) is now enforced by a real cut (lib/pageCut.ts), so
+  it has to match what the reading container holds — too high and every page
+  scrolls, too low and every page ends in a band of dead white. The two are
+  calibrated against each other by eye, and this is the eye.
+
+  Open it directly:  open scripts/measure-page.html
+
+  It reproduces the exact typography from app/[[...address]]/page-content.tsx
+  and page.tsx — 18px Lora, leading-loose, a max-w-2xl column inside p-8
+  padding — fills the container until it overflows 44rem, and reports the count.
+  Keep it in sync if any of those change.
+-->
+<meta charset="utf-8" />
+<title>Page capacity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; font-family: ui-monospace, monospace; background: #fff; color: #171717; }
+  /* max-w-2xl (42rem) + p-8 (2rem each side), matching app/[[...address]]/page.tsx */
+  .main { max-width: 42rem; margin: 0 auto; padding: 2rem; }
+  /* whitespace-pre-wrap font-serif text-lg leading-loose, matching page-content.tsx */
+  .page {
+    white-space: pre-wrap;
+    font-family: Lora, Georgia, serif;
+    font-size: 1.125rem;
+    line-height: 2;
+    color: #262626;
+    outline: 1px dashed #d4d4d4;
+  }
+  .out { position: fixed; top: 0; right: 0; padding: .75rem 1rem; background: #171717; color: #fafafa; font-size: 12px; line-height: 1.6; }
+  .out b { color: #4ade80; font-size: 16px; }
+  .rule { position: absolute; left: 0; right: 0; border-top: 2px solid #ef4444; }
+  .wrap { position: relative; }
+</style>
+
+<div class="main">
+  <div class="wrap">
+    <div class="page" id="page"></div>
+    <div class="rule" id="rule" title="44rem — the bottom of the page"></div>
+  </div>
+</div>
+<div class="out" id="out">measuring…</div>
+
+<script>
+  // 44rem, the PAGE_HEIGHT in page-content.tsx.
+  const PAGE_HEIGHT_PX = 44 * 16;
+
+  // Realistic English prose: word lengths and sentence/paragraph rhythm all
+  // change how much fits, so lorem-style filler of uniform short words would
+  // flatter the number. This is ordinary mixed-length text.
+  const SAMPLE = (
+    "The kiln had been cooling since the previous evening and the bricks still " +
+    "held enough warmth to be felt through a glove. Someone had chalked a figure " +
+    "on the door frame, a number or a date, and it had smeared into illegibility. " +
+    "Around the base the ground was pale with ash that had been rained on and dried " +
+    "again, cracked into small irregular plates. A stack of unfired pots waited " +
+    "under a sheet of corrugated iron, each one wrapped separately in newspaper " +
+    "that had gone soft with damp. "
+  ).split(/\s+/).filter(Boolean);
+
+  const page = document.getElementById("page");
+  const rule = document.getElementById("rule");
+  rule.style.top = PAGE_HEIGHT_PX + "px";
+
+  function render(n) {
+    const words = [];
+    for (let i = 0; i < n; i++) {
+      words.push(SAMPLE[i % SAMPLE.length]);
+      // A paragraph break roughly every 70 words, as real generated pages have.
+      if (i > 0 && i % 70 === 0) words.push("\n\n");
+    }
+    page.textContent = words.join(" ").replace(/ \n\n /g, "\n\n");
+    return page.getBoundingClientRect().height;
+  }
+
+  document.fonts.ready.then(() => {
+    // Grow until the text overflows 44rem; the last count that still fit is
+    // the capacity.
+    let fits = 0;
+    for (let n = 20; n <= 800; n += 5) {
+      if (render(n) > PAGE_HEIGHT_PX) break;
+      fits = n;
+    }
+    render(fits);
+    document.getElementById("out").innerHTML =
+      "<b>PAGE_WORDS &asymp; " + fits + "</b><br>" +
+      "container 44rem = " + PAGE_HEIGHT_PX + "px<br>" +
+      "rendered " + Math.round(page.getBoundingClientRect().height) + "px<br>" +
+      "<br>set this in .env.local:<br>PAGE_WORDS=" + fits;
+  });
+</script>

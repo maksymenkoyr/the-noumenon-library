@@ -58,6 +58,14 @@ export interface ResolvedPage {
   // Applied constraint ids (also carried as `+id` suffixes on promptVariant).
   constraints?: string[];
   maxTokens?: number;
+  // The page-shape levers. Unlike `prompt` these live in the stored inputs
+  // record, so they show on a revisit too.
+  seedWord?: string;
+  pageWords?: number;
+  startMode?: string;
+  ending?: string;
+  actualWords?: number;
+  cut?: boolean;
 }
 
 /**
@@ -81,6 +89,12 @@ export function devFields(
   | "provider"
   | "constraints"
   | "maxTokens"
+  | "seedWord"
+  | "pageWords"
+  | "startMode"
+  | "ending"
+  | "actualWords"
+  | "cut"
 > {
   if (!inputs) return { model: fallbackModel ?? undefined };
   return {
@@ -95,6 +109,12 @@ export function devFields(
     provider: inputs.provider,
     constraints: inputs.constraints,
     maxTokens: inputs.maxTokens,
+    seedWord: inputs.seedWord,
+    pageWords: inputs.pageWords,
+    startMode: inputs.startMode,
+    ending: inputs.ending,
+    actualWords: inputs.actualWords,
+    cut: inputs.cut,
   };
 }
 
