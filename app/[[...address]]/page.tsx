@@ -130,9 +130,11 @@ async function PageBody({
         promptVariant={resolved.promptVariant}
         temperature={resolved.temperature}
         seedWord={resolved.seedWord}
-        maxWords={resolved.maxWords}
+        pageWords={resolved.pageWords}
         startMode={resolved.startMode}
-        endMode={resolved.endMode}
+        ending={resolved.ending}
+        actualWords={resolved.actualWords}
+        cut={resolved.cut}
       />
     );
   }
@@ -160,9 +162,11 @@ async function CommittedPage({
   promptVariant,
   temperature,
   seedWord,
-  maxWords,
+  pageWords,
   startMode,
-  endMode,
+  ending,
+  actualWords,
+  cut,
 }: {
   address: string;
   text: string;
@@ -179,9 +183,11 @@ async function CommittedPage({
   promptVariant?: string;
   temperature?: number;
   seedWord?: string;
-  maxWords?: number;
+  pageWords?: number;
   startMode?: string;
-  endMode?: string;
+  ending?: string;
+  actualWords?: number;
+  cut?: boolean;
 }) {
   const likeCount = await getLikeCount(address);
   return (
@@ -197,9 +203,11 @@ async function CommittedPage({
           promptVariant={promptVariant}
           temperature={temperature}
           seedWord={seedWord}
-          maxWords={maxWords}
+          pageWords={pageWords}
           startMode={startMode}
-          endMode={endMode}
+          ending={ending}
+          actualWords={actualWords}
+          cut={cut}
         />
       )}
       <Marks address={address} initialCount={likeCount} />

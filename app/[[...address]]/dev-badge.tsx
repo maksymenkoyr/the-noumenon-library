@@ -24,9 +24,11 @@ export function DevBadge({
   promptVariant,
   temperature,
   seedWord,
-  maxWords,
+  pageWords,
+  actualWords,
+  cut,
   startMode,
-  endMode,
+  ending,
 }: {
   model?: string | null;
   generationMs?: number;
@@ -36,9 +38,11 @@ export function DevBadge({
   promptVariant?: string;
   temperature?: number;
   seedWord?: string;
-  maxWords?: number;
+  pageWords?: number;
+  actualWords?: number;
+  cut?: boolean;
   startMode?: string;
-  endMode?: string;
+  ending?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   if (!model && generationMs == null && moderationMs == null) return null;
@@ -83,17 +87,23 @@ export function DevBadge({
                 <dd>{seedWord}</dd>
               </>
             )}
-            {maxWords != null && (
+            {pageWords != null && (
               <>
                 <dt>words</dt>
-                <dd>≤ {maxWords}</dd>
+                {/* Stored against the page it was written to fill. "short"
+                    flags a cut-* ending that never cut, i.e. the model
+                    returned less than a full page. */}
+                <dd>
+                  {actualWords ?? "?"} / {pageWords}
+                  {cut === false && ending !== "complete" && " · short"}
+                </dd>
               </>
             )}
-            {(startMode || endMode) && (
+            {(startMode || ending) && (
               <>
                 <dt>edges</dt>
                 <dd>
-                  {startMode ?? "?"} → {endMode ?? "?"}
+                  {startMode ?? "?"} → {ending ?? "?"}
                 </dd>
               </>
             )}

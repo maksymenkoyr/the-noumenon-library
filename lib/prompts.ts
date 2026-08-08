@@ -12,15 +12,34 @@
  * either: stating that the text *begins mid-sentence* does the same job in three
  * words, because a text that starts mid-sentence cannot also introduce itself.
  *
- * So `base-v2` states four things and nothing else:
+ * So `base-v3` states three things and nothing else:
  *
- *   Generate about 270 words of text. It begins mid-sentence and ends
- *   mid-sentence. Something in it has to do with turquoise.
+ *   Generate about 300 words of text. It begins mid-sentence. The opening is
+ *   not marked with an ellipsis. Something in it has to do with turquoise.
  *
- *   length  — drawn per page from [pageMinWords, pageMaxWords]
- *   start   — how abruptly it opens        } drawn independently:
- *   end     — how abruptly it stops        } nine combinations
+ *   length  — an *overshoot* target: more than the page holds, so there is
+ *             always material to cut (lib/pageCut.ts)
+ *   start   — which seam the page break lands on at the top
  *   seed    — the gallery's association term (lib/gallerySeeds.ts)
+ *
+ * **The prompt no longer says anything about how the text ends.** `base-v2`
+ * did, and it did not work: asked for 400 words it returned 531, 503, 724 and
+ * 777 across four live runs, and the "At 400 words it runs out of room"
+ * phrasing seems to have *caused* the overrun by implying more text exists.
+ * Models cannot count. So the ending moved out of the prompt entirely and
+ * became a cut applied to whatever came back — see lib/pageCut.ts. The split
+ * is: **prompt what the model can do, compute what it can't.**
+ *
+ * The start survived that cull because it demonstrably works — asked to begin
+ * mid-word the model returns *"mentary evidence suggests…"*. A text that
+ * starts mid-sentence also cannot introduce itself, which is what makes the
+ * assistant preamble impossible without any framing to forbid it.
+ *
+ * "The opening is not marked with an ellipsis" is load-bearing: left alone the
+ * model signposts the seam with a leading `…`, a narrator's gesture meaning
+ * *this is an excerpt*. Real paper does not apologize for where it begins.
+ * (lib/pageCut.ts strips them from both edges regardless — the clause is
+ * cheaper than a cut that has to clean up after it.)
  *
  * Prose, not a `Key: value` block. In testing, a block overshot the stated word
  * count by 17–23% and ignored its own `Ends: mid-sentence.` line — a parameter
@@ -38,48 +57,83 @@
  * the distribution; phrasing barely does.
  */
 
-/** How abruptly the text opens or stops. Logged per page as provenance. */
-export type Abruptness = "mid-sentence" | "mid-word" | "clean";
+/**
+ * Which seam the page break lands on at the **top** of the page — the four
+ * places a real book page can start. Logged per page as provenance.
+ *
+ * There is no matching pool for the bottom of the page. The ending is not
+ * something the model can be asked for (lib/pageCut.ts explains why) so it is
+ * computed from the returned text instead; only the start survives as a prompt
+ * lever, because the model demonstrably obeys it.
+ */
+export type StartSeam =
+  | "mid-word"
+  | "mid-sentence"
+  | "mid-paragraph"
+  | "paragraph-break";
 
-export interface AbruptnessOption {
-  id: Abruptness;
-  // Slots into both "It begins ___" and "and ends ___", so every value reads
-  // correctly in either position.
+export interface StartSeamOption {
+  id: StartSeam;
+  // Slots into "It begins ___".
   phrase: string;
   weight: number;
 }
 
 /**
- * `mid-word` is the most aggressive and the most true to a real page — a book's
- * page break lands wherever it lands — but it is also the most likely to read
- * as a broken generation rather than an authentic slice, so it stays rare.
- * Drawn separately for start and end, giving nine combinations.
+ * The four seams, weighted roughly by how often a page break lands on each.
+ *
+ * `mid-paragraph` is the interesting one: the sentence completes but the
+ * paragraph does not, which is the commonest way a real page actually reads —
+ * no jagged edge, yet plainly unfinished. Without it the pool was a binary
+ * between a clean literary opening and a severed one.
+ *
+ * `paragraph-break` is deliberately uncommon. It is the one seam that lets the
+ * model write a proper opening line, and it does: *"The old lighthouse keeper
+ * had not spoken in three days."* is a fine first sentence and a terrible
+ * page — a page of a book almost never gets to introduce itself.
+ *
+ * `mid-word` stays rarest. It is the most true to real paper and the most
+ * likely to read as a broken generation rather than an authentic slice.
  */
-export const ABRUPTNESS: readonly AbruptnessOption[] = [
-  { id: "mid-sentence", phrase: "mid-sentence", weight: 45 },
-  { id: "clean", phrase: "cleanly", weight: 40 },
+export const START_SEAMS: readonly StartSeamOption[] = [
+  { id: "mid-sentence", phrase: "mid-sentence", weight: 40 },
+  { id: "mid-paragraph", phrase: "between two sentences, mid-paragraph", weight: 25 },
+  { id: "paragraph-break", phrase: "at the start of a paragraph", weight: 20 },
   { id: "mid-word", phrase: "mid-word", weight: 15 },
 ];
 
-/** Weighted draw from the abruptness pool, off the caller's seeded stream. */
-export function pickAbruptness(rng: () => number): AbruptnessOption {
-  const total = ABRUPTNESS.reduce((sum, o) => sum + o.weight, 0);
+/** Weighted draw from the start-seam pool, off the caller's seeded stream. */
+export function pickStartSeam(rng: () => number): StartSeamOption {
+  const total = START_SEAMS.reduce((sum, o) => sum + o.weight, 0);
   let r = rng() * total;
-  for (const option of ABRUPTNESS) {
+  for (const option of START_SEAMS) {
     r -= option.weight;
     if (r <= 0) return option;
   }
-  return ABRUPTNESS[ABRUPTNESS.length - 1]; // floating-point rounding fallback
+  return START_SEAMS[START_SEAMS.length - 1]; // floating-point rounding fallback
 }
 
+/**
+ * How much more than a page to ask for, so lib/pageCut.ts always has material
+ * to cut. Only a floor matters — the model overshoots any stated count by
+ * 26–94% on its own, so this mostly guards the case where it undershoots.
+ * Everything past the page is paid for and discarded, which is the price of an
+ * ending that is real rather than requested; at the current page size it still
+ * costs less per page than the 320–417-word pages it replaces.
+ */
+export const OVERSHOOT = 1.5;
+
 export interface PromptContext {
-  // Drawn per page from the address-seeded stream (lib/generate.ts), not a
-  // constant — length is an entropy axis, not a fixed page size.
-  maxWords: number;
-  // Abruptness phrases, drawn independently. Default to the commonest value so
-  // a minimal caller (tests) still builds a valid prompt.
+  // config.pageWords — the size of the paper, identical on every page in the
+  // library. NOT what goes in the prompt: the builder asks for OVERSHOOT times
+  // this, because the page is what the text is cut to, not what it aims at.
+  pageWords: number;
+  // The start-seam phrase. Defaults to the commonest value so a minimal caller
+  // (tests) still builds a valid prompt. There is no `end` — see the header.
   start?: string;
-  end?: string;
+  // Set for the `complete` ending only (lib/pageCut.ts): the text is asked to
+  // reach its own end at roughly this length instead of overshooting the page.
+  completeWords?: number;
   // Sampled constraint sentences (GENERATION_CONSTRAINTS), appended in order.
   // Facts about the text, never orders to a writer. Empty when nothing fired.
   constraints?: readonly string[];
@@ -153,21 +207,30 @@ export const GENERATION_CONSTRAINTS: readonly PromptConstraint[] = [
 ];
 
 const VARIANTS: Record<string, PromptBuilder> = {
-  // One paragraph, one sentence per parameter. `base-v1` (the endless-library
-  // transcriber prompt) is retired rather than kept alongside: commit d8905e0
-  // deliberately collapsed generation to a single variant, and the id is bumped
-  // because reusing it would make provenance lie — rows recording `base-v1`
-  // came from materially different text.
-  "base-v2": ({
-    maxWords,
+  // One paragraph, one sentence per parameter. Earlier ids are retired rather
+  // than kept alongside: commit d8905e0 deliberately collapsed generation to a
+  // single variant, and the id is bumped on every material rewrite because
+  // reusing it would make provenance lie — rows recording `base-v2` were
+  // written to a prompt that still asked for an ending.
+  "base-v3": ({
+    pageWords,
     start = "mid-sentence",
-    end = "mid-sentence",
+    completeWords,
     constraints = [],
     seedTerm,
   }) =>
     [
-      `Generate about ${maxWords} words of text.`,
-      `It begins ${start} and ends ${end}.`,
+      // `complete` asks for a finished text at its own length; every other
+      // ending asks for more than the page holds and is cut down to it
+      // (lib/pageCut.ts). Either way the number is a target the model will
+      // miss — which is exactly why it is no longer load-bearing.
+      completeWords
+        ? `Generate about ${completeWords} words of text, complete in itself.`
+        : `Generate about ${Math.round(pageWords * OVERSHOOT)} words of text.`,
+      `It begins ${start}.`,
+      // Unprompted, the model marks the seam with a leading `…` — a narrator
+      // saying "excerpt". The seam is the paper's, not the text's.
+      "The opening is not marked with an ellipsis.",
       // The gallery's association term. Deliberately loose ("something in it
       // has to do with"): a bare noun stated as the subject turns the text into
       // an encyclopedia entry about it.
@@ -176,7 +239,7 @@ const VARIANTS: Record<string, PromptBuilder> = {
     ].join(" "),
 };
 
-export const DEFAULT_PROMPT_VARIANT = "base-v2";
+export const DEFAULT_PROMPT_VARIANT = "base-v3";
 
 export const PROMPT_VARIANT_IDS = Object.keys(VARIANTS);
 

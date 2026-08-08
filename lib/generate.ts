@@ -17,13 +17,14 @@ import {
   type Provider,
 } from "./providers";
 import { pickTerm, termsForGallery } from "./gallerySeeds";
+import { pickEnding, type Ending } from "./pageCut";
 import {
   buildPrompt,
   DEFAULT_PROMPT_VARIANT,
   GENERATION_CONSTRAINTS,
-  pickAbruptness,
-  type Abruptness,
+  pickStartSeam,
   type PromptConstraint,
+  type StartSeam,
 } from "./prompts";
 import { chooseGenerationModel, markCooling, markHealthy, markUnavailable, poolFor } from "./registry";
 import { attemptSeed, makeSeededRandom, volumeSeed } from "./seededRandom";
@@ -45,16 +46,22 @@ export interface GenerationLevers {
   provider: Provider;
   temperature: number; // jittered around the chosen row's base temperature
   maxTokens: number; // the chosen row's max_tokens
-  // Word budget stated in the prompt, drawn per page from
-  // [config.pageMinWords, config.pageMaxWords]. Not the same thing as
-  // maxTokens: that is the hard provider cap, this is the shape we ask for.
-  maxWords: number;
-  // How abruptly the text opens and stops, drawn independently (nine
-  // combinations). Ids are persisted; the phrases go into the prompt.
-  start: Abruptness;
-  end: Abruptness;
+  // config.pageWords — the same on every page, so not a lever at all; carried
+  // here so provenance records the paper size a page was written to, which can
+  // change between deploys. Not the same thing as maxTokens: that is the hard
+  // provider cap, this is the size of the page.
+  pageWords: number;
+  // Which seam the page break lands on at the top. Prompt-side, because the
+  // model obeys it. The id is persisted; the phrase goes into the prompt.
+  start: StartSeam;
   startPhrase: string;
-  endPhrase: string;
+  // How the page stops (lib/pageCut.ts). Deliberately NOT in the prompt — it
+  // is applied to the returned text in lib/pipeline.ts, because a model asked
+  // to stop at a word count misses by 26–94%.
+  ending: Ending;
+  // Target length for the `complete` ending only, drawn well under a page so
+  // the model's own overshoot still lands inside it. Undefined otherwise.
+  completeWords?: number;
   promptVariant: string;
   // Dynamic constraints sampled for this page. Their ids ride into
   // provenance via provenanceVariant().
@@ -91,19 +98,6 @@ function sampleConstraints(rng: () => number): PromptConstraint[] {
 }
 
 /**
- * A per-page word budget, uniform over the configured range. Length was the
- * one entropy axis with no variance at all — a fixed 400 in the prompt put
- * every stored page between 320 and 417 words — and it costs nothing to vary,
- * since the prompt already took the number as a parameter. A 70-word page
- * beside a 400-word one changes how a wander feels more than any wording does.
- */
-function jitteredMaxWords(rng: () => number): number {
-  const { pageMinWords, pageMaxWords } = config;
-  if (pageMaxWords <= pageMinWords) return pageMaxWords;
-  return Math.round(pageMinWords + rng() * (pageMaxWords - pageMinWords));
-}
-
-/**
  * The prompt_variant value persisted for a generation: the variant id plus a
  * `+id` suffix per applied constraint (e.g. `base-v1+no-library`), so the
  * constraint dial stays attributable in wander reports and SQL without a
@@ -137,14 +131,21 @@ export async function chooseLevers(
   const stats = await getModelStats();
   const chosen = await chooseGenerationModel(stats, rng);
   const promptVariant = DEFAULT_PROMPT_VARIANT;
-  // Fixed draw order (model above, then constraints, temperature, length) so a
-  // given seed always maps to the same page. Append new draws at the END —
-  // inserting one mid-sequence reshuffles every lever after it.
+  // Fixed draw order (model above, then constraints, temperature, start,
+  // ending) so a given seed always maps to the same page. Append new draws at
+  // the END — inserting one mid-sequence reshuffles every lever after it.
   const constraints = sampleConstraints(rng);
   const temperature = jitteredTemperature(chosen.temperature, rng);
-  const maxWords = jitteredMaxWords(rng);
-  const start = pickAbruptness(rng);
-  const end = pickAbruptness(rng);
+  const start = pickStartSeam(rng);
+  const ending = pickEnding(rng);
+  // Drawn only for `complete`, and deliberately far under a page: the model
+  // overshoots any stated count by up to ~94%, so asking for much more than
+  // half a page would produce a "complete" text that overruns the paper and
+  // gets cut anyway — which is the one outcome this ending exists to avoid.
+  const completeWords =
+    ending.id === "complete"
+      ? Math.round(config.pageWords * (0.2 + rng() * 0.35))
+      : undefined;
   // Drawn from a separate, volume-scoped stream (lib/seededRandom.ts
   // volumeSeed) rather than the page stream above: the subject must hold
   // across all 410 pages of a volume, and must survive a retry's redraw.
@@ -153,7 +154,8 @@ export async function chooseLevers(
   devLog(
     `generate address=${address} attempt=${attempt} model=${chosen.slug} ` +
       `provider=${chosen.provider} temp=${temperature.toFixed(2)} ` +
-      `maxWords=${maxWords} start=${start.id} end=${end.id} ` +
+      `pageWords=${config.pageWords} start=${start.id} ending=${ending.id} ` +
+      (completeWords ? `completeWords=${completeWords} ` : "") +
       `variant=${promptVariant}` +
       (seedTerm ? ` seed=${seedTerm}` : "") +
       (constraints.length
@@ -165,11 +167,11 @@ export async function chooseLevers(
     provider: chosen.provider,
     temperature,
     maxTokens: chosen.maxTokens,
-    maxWords,
+    pageWords: config.pageWords,
     start: start.id,
-    end: end.id,
     startPhrase: start.phrase,
-    endPhrase: end.phrase,
+    ending: ending.id,
+    completeWords,
     promptVariant,
     constraints,
     seedTerm,
@@ -254,9 +256,9 @@ export async function generatePage(
 ): Promise<GenerationResult> {
   const constraintTexts = levers.constraints.map((c) => c.text);
   const prompt = buildPrompt(levers.promptVariant, {
-    maxWords: levers.maxWords,
+    pageWords: levers.pageWords,
     start: levers.startPhrase,
-    end: levers.endPhrase,
+    completeWords: levers.completeWords,
     constraints: constraintTexts,
     seedTerm: levers.seedTerm,
   });

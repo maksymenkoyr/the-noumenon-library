@@ -53,9 +53,11 @@ export interface ResolvedPage {
   // The two levers added with the gallery-seed work. Unlike `prompt` these
   // live in the stored inputs record, so they show on a revisit too.
   seedWord?: string;
-  maxWords?: number;
+  pageWords?: number;
   startMode?: string;
-  endMode?: string;
+  ending?: string;
+  actualWords?: number;
+  cut?: boolean;
 }
 
 /**
@@ -76,9 +78,11 @@ export function devFields(
   | "promptVariant"
   | "temperature"
   | "seedWord"
-  | "maxWords"
+  | "pageWords"
   | "startMode"
-  | "endMode"
+  | "ending"
+  | "actualWords"
+  | "cut"
 > {
   if (!inputs) return { model: fallbackModel ?? undefined };
   return {
@@ -90,9 +94,11 @@ export function devFields(
     promptVariant: inputs.promptVariant,
     temperature: inputs.temperature,
     seedWord: inputs.seedWord,
-    maxWords: inputs.maxWords,
+    pageWords: inputs.pageWords,
     startMode: inputs.startMode,
-    endMode: inputs.endMode,
+    ending: inputs.ending,
+    actualWords: inputs.actualWords,
+    cut: inputs.cut,
   };
 }
 

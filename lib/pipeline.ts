@@ -7,7 +7,21 @@ import {
 } from "./generate";
 import { moderate, type ModerationResult } from "./moderate";
 import { monitor } from "./monitor";
+import { applyEnding } from "./pageCut";
 import { contentExistsElsewhere, hashContent, type PageInputs } from "./store";
+
+/**
+ * One generation attempt after its ending has been applied — the text as it
+ * would be stored, plus what the cut did to it. Carried through the pipeline
+ * so provenance describes whichever attempt ends up committed, not the last
+ * one that ran.
+ */
+interface Attempt {
+  text: string;
+  prompt: string;
+  words: number;
+  cut: boolean;
+}
 
 /**
  * The generation pipeline — architecture §2 steps 5–8 for one novel page:
@@ -39,7 +53,8 @@ function inputsFrom(
   prompt: string,
   generationMs: number,
   moderationMs: number,
-  moderationModel?: string,
+  moderationModel: string | undefined,
+  attempt: Attempt,
 ): PageInputs {
   return {
     model: levers.model,
@@ -51,9 +66,15 @@ function inputsFrom(
     // Projected to the pages.seed_word column by commitPage, not onto
     // promptVariant — see PageInputs.seedWord.
     seedWord: levers.seedTerm,
-    maxWords: levers.maxWords,
+    pageWords: levers.pageWords,
     startMode: levers.start,
-    endMode: levers.end,
+    ending: levers.ending,
+    // What the reader got, against the page it was written to fill. `cut:
+    // false` on a cut-* ending means the model came up short of a full page —
+    // the one case where whitespace on screen is a weak generation rather
+    // than a choice, and the signal to look at when tuning.
+    actualWords: attempt.words,
+    cut: attempt.cut,
     prompt,
     moderationModel,
     generationMs,
@@ -72,14 +93,19 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   // place so provenance always names the model that actually produced the
   // content, not just the one requested. Also returns the exact prompt sent,
   // for the caller to track alongside content (dev-overlay provenance).
-  const run = async (l: GenerationLevers): Promise<{ text: string; prompt: string }> => {
+  //
+  // The drawn ending is applied *here*, before anything else sees the text:
+  // moderation, the dedup hash, and the stored row must all be the page the
+  // reader actually gets, not the longer draft it was cut from (lib/pageCut.ts).
+  const run = async (l: GenerationLevers): Promise<Attempt> => {
     const result = await generatePage(l);
     usage.tokens += result.usage.tokens;
     usage.costUsd += result.usage.costUsd;
     generationMs += result.durationMs;
     l.model = result.model;
     l.provider = result.provider;
-    return { text: result.text, prompt: result.prompt };
+    const cut = applyEnding(result.text, l.ending, l.pageWords);
+    return { text: cut.text, prompt: result.prompt, words: cut.words, cut: cut.cut };
   };
   // Runs moderation and folds in its wall time, kept separate from generation
   // time above (dev-overlay provenance — see PipelineResult). Returns the full
@@ -96,13 +122,17 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   // (lib/generate.ts), and each regeneration below bumps the attempt index so
   // a retry deterministically draws a different sample than the one it replaces.
   let levers = await chooseLevers(address, 0);
-  let { text: content, prompt } = await run(levers);
+  let attempt = await run(levers);
+  let content = attempt.text;
+  let prompt = attempt.prompt;
 
   let modResult = await check(content);
   if (!modResult.ok) {
     // Moderation fail → regenerate once with fresh levers (architecture §7).
     levers = await chooseLevers(address, 1);
-    ({ text: content, prompt } = await run(levers));
+    attempt = await run(levers);
+    content = attempt.text;
+    prompt = attempt.prompt;
     modResult = await check(content);
     if (!modResult.ok) {
       // Two rejects in a row. We never store failing content, but we no longer
@@ -125,6 +155,7 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
     const dedupModResult = await check(dedupRun.text);
     if (dedupModResult.ok) {
       levers = dedupLevers;
+      attempt = dedupRun;
       content = dedupRun.text;
       prompt = dedupRun.prompt;
       moderationModel = dedupModResult.model;
@@ -133,7 +164,7 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
 
   return {
     content,
-    inputs: inputsFrom(levers, prompt, generationMs, moderationMs, moderationModel),
+    inputs: inputsFrom(levers, prompt, generationMs, moderationMs, moderationModel, attempt),
     usage,
   };
 }

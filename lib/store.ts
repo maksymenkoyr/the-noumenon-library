@@ -49,15 +49,23 @@ export interface PageInputs {
   // suffixed onto promptVariant: term cardinality is unbounded, and suffixing
   // would shatter the variant_signals view into one bucket per term.
   seedWord?: string;
-  // Word budget asked for in the prompt, drawn per page. Kept so a page's
-  // length can be read against what was requested.
-  maxWords?: number;
-  // How abruptly the text was asked to open and stop (lib/prompts.ts
-  // Abruptness). Kept here rather than suffixed onto promptVariant: nine
-  // combinations would multiply the variant_signals buckets ninefold. Query
-  // them off the JSONB instead — `inputs->>'startMode'`.
+  // The paper size stated in the prompt (config.pageWords). Constant across
+  // the library at any moment, but recorded per page because changing it
+  // changes every page written afterwards — this is what lets a page's actual
+  // length be read against the page it was written to fill.
+  pageWords?: number;
+  // Which seam the page break landed on at the top (lib/prompts.ts StartSeam),
+  // and how the page was stopped at the bottom (lib/pageCut.ts Ending). Kept
+  // here rather than suffixed onto promptVariant: the combinations would
+  // multiply the variant_signals buckets twelvefold. Query them off the JSONB
+  // instead — `inputs->>'startMode'`, `inputs->>'ending'`.
   startMode?: string;
-  endMode?: string;
+  ending?: string;
+  // Words actually stored, and whether the ending cut anything. Together they
+  // say how full the page came out: `cut: false` on a cut-* ending means the
+  // model returned less than a page and there was nothing to trim.
+  actualWords?: number;
+  cut?: boolean;
   // The exact prompt sent for whichever attempt ended up committed.
   prompt?: string;
   // The chain link that passed the committed content (lib/moderate.ts).

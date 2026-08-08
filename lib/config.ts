@@ -133,14 +133,18 @@ export const config = {
   // prompt. The per-call token cap for generation/moderation comes from the
   // chosen model_registry row's max_tokens (lib/registry.ts).
   //
-  // These are the ends of a *range*, not a fixed size: each page draws its own
-  // word budget uniformly from [pageMinWords, pageMaxWords] on the
-  // address-seeded stream (lib/generate.ts). Length was the one entropy axis
-  // sitting at zero variance — every stored page landed 320–417 words, mean
-  // 367 — because this was a single constant. Set both to the same value to
-  // pin length again.
-  pageMinWords: numeric("PAGE_MIN_WORDS", 60),
-  pageMaxWords: numeric("PAGE_MAX_WORDS", 400),
+  // One size for every page in the library — this is the paper, not a budget.
+  // It is never asked for in the prompt (models miss a stated word count by
+  // 26–94%); the model is asked for more than this and the text is cut down to
+  // it in lib/pageCut.ts, so a full page is exactly this many words.
+  //
+  // Sized to what the reading container actually holds, NOT the other way
+  // round: PAGE_HEIGHT is min-h-[44rem] over a 608px column of 18px Lora on
+  // 36px lines ≈ 19.5 lines, and blank lines between paragraphs eat several of
+  // those. 400 was inherited from when this was a "max" nobody enforced, and
+  // it overflowed the container by roughly 2× — the fixed-size page was a
+  // fiction. Retune this and PAGE_HEIGHT together, by eye, in a browser.
+  pageWords: numeric("PAGE_WORDS", 200),
   // Concurrency guard tunables (docs/reference/architecture.md §3). The stale window
   // must comfortably exceed worst-case generation time. Lowered 300 → 90 now
   // that reasoning is off on every call (§4 of the model-pool rework) — the

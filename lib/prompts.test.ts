@@ -1,22 +1,52 @@
 import { describe, expect, it } from "vitest";
 import {
-  ABRUPTNESS,
   DEFAULT_PROMPT_VARIANT,
   GENERATION_CONSTRAINTS,
+  OVERSHOOT,
   PROMPT_VARIANT_IDS,
+  START_SEAMS,
   buildPrompt,
-  pickAbruptness,
+  pickStartSeam,
 } from "./prompts";
 
-const ctx = { maxWords: 400 };
+const ctx = { pageWords: 200 };
 
 describe("buildPrompt", () => {
-  it("states the word budget it is given", () => {
-    expect(buildPrompt(DEFAULT_PROMPT_VARIANT, ctx)).toContain("400");
-    // maxWords is drawn per page (lib/generate.ts jitteredMaxWords), so nothing
-    // may be baked in.
-    expect(buildPrompt(DEFAULT_PROMPT_VARIANT, { maxWords: 70 })).toContain("70");
-    expect(buildPrompt(DEFAULT_PROMPT_VARIANT, { maxWords: 70 })).not.toContain("400");
+  it("asks for more than a page, so there is always something to cut", () => {
+    // The page size itself must never appear: it is what the text is cut down
+    // to (lib/pageCut.ts), not what the model aims at.
+    const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
+    expect(prompt).toContain(`about ${Math.round(200 * OVERSHOOT)} words`);
+    expect(prompt).not.toMatch(/\b200\b/);
+    expect(OVERSHOOT).toBeGreaterThan(1);
+  });
+
+  it("never states an ending — that is the whole redesign", () => {
+    // base-v2 asked for one. Given "Generate 400 words … At 400 words it runs
+    // out of room and stops mid-sentence" a live model returned 531, 503, 724
+    // and 777 words. Models cannot count, so the ending left the prompt.
+    const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, {
+      ...ctx,
+      seedTerm: "oak bark",
+      constraints: GENERATION_CONSTRAINTS.map((c) => c.text),
+    });
+    expect(prompt).not.toMatch(/runs out of room|it ends|and ends|stops mid/i);
+  });
+
+  it("asks for a finished text only under the complete ending", () => {
+    const complete = buildPrompt(DEFAULT_PROMPT_VARIANT, { ...ctx, completeWords: 60 });
+    expect(complete).toContain("about 60 words of text, complete in itself.");
+    // …and that length replaces the overshoot rather than adding to it.
+    expect(complete).not.toContain(`${Math.round(200 * OVERSHOOT)}`);
+    expect(buildPrompt(DEFAULT_PROMPT_VARIANT, ctx)).not.toContain("complete in itself");
+  });
+
+  it("forbids marking the opening with an ellipsis", () => {
+    // Left alone the model signposts the seam with a leading "…", a narrator
+    // saying *this is an excerpt*. lib/pageCut.ts strips them regardless.
+    expect(buildPrompt(DEFAULT_PROMPT_VARIANT, ctx)).toContain(
+      "The opening is not marked with an ellipsis.",
+    );
   });
 
   it("never carries the address, and never makes the model the text", () => {
@@ -36,17 +66,17 @@ describe("buildPrompt", () => {
 
   it("exposes the default variant in the registry", () => {
     expect(PROMPT_VARIANT_IDS).toContain(DEFAULT_PROMPT_VARIANT);
-    // Bumped from base-v1 when the endless-library transcriber prompt was
-    // retired: reusing the id would make provenance lie, since stored rows
-    // recording base-v1 came from materially different text.
-    expect(DEFAULT_PROMPT_VARIANT).toBe("base-v2");
+    // Bumped on every material rewrite: reusing an id would make provenance
+    // lie, since rows recording base-v2 were written to a prompt that still
+    // asked for an ending.
+    expect(DEFAULT_PROMPT_VARIANT).toBe("base-v3");
   });
 
   it("stays terse — the whole point of the trim", () => {
     // Base was 74 words, and ~114 on a typical page once the two 0.75
-    // correctives fired. Four parameters and nothing else.
+    // correctives fired. Dropping the ending clause bought some of that back.
     const base = buildPrompt(DEFAULT_PROMPT_VARIANT, ctx);
-    expect(base.trim().split(/\s+/).length).toBeLessThan(20);
+    expect(base.trim().split(/\s+/).length).toBeLessThan(25);
     // No trace of the retired premise.
     expect(base).not.toMatch(/library|shelf|archive|page/i);
   });
@@ -110,28 +140,32 @@ describe("buildPrompt", () => {
   });
 });
 
-describe("abruptness", () => {
-  it("reads correctly in both positions for every value", () => {
-    // One phrase list serves "It begins ___" and "and ends ___" alike, so a
-    // value that only works in one slot is a bug.
-    for (const option of ABRUPTNESS) {
-      const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, {
-        ...ctx,
-        start: option.phrase,
-        end: option.phrase,
-      });
-      expect(prompt).toContain(`It begins ${option.phrase} and ends ${option.phrase}.`);
+describe("start seams", () => {
+  it("reads correctly for every seam", () => {
+    for (const option of START_SEAMS) {
+      const prompt = buildPrompt(DEFAULT_PROMPT_VARIANT, { ...ctx, start: option.phrase });
+      expect(prompt).toContain(`It begins ${option.phrase}.`);
     }
   });
 
-  it("carries the three modes, with mid-word the rarest", () => {
-    expect(ABRUPTNESS.map((o) => o.id).sort()).toEqual([
-      "clean",
+  it("has no counterpart pool for the bottom of the page", () => {
+    // The asymmetry is the point: the model obeys a start instruction ("begins
+    // mid-word" → *"mentary evidence suggests…"*) and cannot obey an ending
+    // one, so the ending is computed instead (lib/pageCut.ts).
+    for (const option of START_SEAMS) {
+      expect(option).not.toHaveProperty("endPhrase");
+    }
+  });
+
+  it("carries the four seams, with mid-word the rarest", () => {
+    expect([...START_SEAMS.map((o) => o.id)].sort()).toEqual([
+      "mid-paragraph",
       "mid-sentence",
       "mid-word",
+      "paragraph-break",
     ]);
-    const midWord = ABRUPTNESS.find((o) => o.id === "mid-word");
-    for (const other of ABRUPTNESS) {
+    const midWord = START_SEAMS.find((o) => o.id === "mid-word");
+    for (const other of START_SEAMS) {
       if (other.id !== "mid-word") {
         // mid-word is the most authentic to a real page break and the most
         // likely to read as a broken generation — it stays rare.
@@ -140,22 +174,33 @@ describe("abruptness", () => {
     }
   });
 
-  it("draws every mode given enough samples, and is deterministic", () => {
+  it("keeps a clean opening in the minority", () => {
+    // paragraph-break is the only seam that lets the model write a proper
+    // first line, and given the chance it writes *"The old lighthouse keeper
+    // had not spoken in three days."* — a fine opening and a terrible page.
+    const total = START_SEAMS.reduce((sum, o) => sum + o.weight, 0);
+    const clean = START_SEAMS.find((o) => o.id === "paragraph-break")!;
+    expect(clean.weight / total).toBeLessThan(0.25);
+  });
+
+  it("draws every seam given enough samples, and is deterministic", () => {
     let seed = 1;
     const rng = () => {
       seed = (seed * 16807) % 2147483647;
       return seed / 2147483647;
     };
-    const drawn = new Set(Array.from({ length: 200 }, () => pickAbruptness(rng).id));
-    expect(drawn.size).toBe(3);
+    const drawn = new Set(Array.from({ length: 200 }, () => pickStartSeam(rng).id));
+    expect(drawn.size).toBe(4);
 
     // Same stream position → same draw.
     const fixed = () => 0.01;
-    expect(pickAbruptness(fixed).id).toBe(pickAbruptness(fixed).id);
+    expect(pickStartSeam(fixed).id).toBe(pickStartSeam(fixed).id);
   });
 
-  it("defaults to a valid prompt when a caller omits the modes", () => {
-    expect(buildPrompt(DEFAULT_PROMPT_VARIANT, ctx)).toMatch(/It begins .+ and ends .+\./);
+  it("defaults to a valid prompt when a caller omits the seam", () => {
+    expect(buildPrompt(DEFAULT_PROMPT_VARIANT, ctx)).toMatch(
+      /Generate about \d+ words of text\. It begins .+\./,
+    );
   });
 });
 
