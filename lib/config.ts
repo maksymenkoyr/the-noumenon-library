@@ -116,13 +116,18 @@ export const config = {
     ? process.env.MODERATION_ENABLED === "true"
     : true,
   // Generation entropy levers (docs/reference/generation.md, architecture.md §6).
-  // Temperature starts coherent (the library drifts stranger over geological
-  // time); Phase 9 retunes it. It is logged per page as provenance.
-  temperature: numeric("GENERATION_TEMPERATURE", 0.9),
-  // Per-page temperature jitter: the actual temperature is the base ± a uniform
-  // draw up to this magnitude, clamped to a sane range. A model-agnostic variety
-  // lever that works even when generation is pinned to a single model. 0 = off.
-  temperatureJitter: nonNegative("GENERATION_TEMPERATURE_JITTER", 0.2),
+  // The *base* temperature is not an env var: it comes from the chosen model's
+  // model_registry row (lib/registry.ts), so each pool member can run at its own
+  // setting. Change it with SQL — `UPDATE model_registry SET temperature = …
+  // WHERE task = 'generation'` — which survives db:migrate, since the schema.sql
+  // seed is ON CONFLICT DO NOTHING.
+  //
+  // This is the only env-side temperature knob: the per-page jitter. The actual
+  // temperature is that row's base ± a uniform draw up to this magnitude,
+  // clamped to a sane range (lib/generate.ts jitteredTemperature), and logged
+  // per page as provenance. A model-agnostic variety lever that works even when
+  // generation is pinned to a single model. 0 = off.
+  temperatureJitter: nonNegative("GENERATION_TEMPERATURE_JITTER", 0.1),
   // Page-size constraint (docs/reference/generation.md), stated in the
   // prompt. The per-call token cap for generation/moderation comes from the
   // chosen model_registry row's max_tokens (lib/registry.ts).
