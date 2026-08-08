@@ -183,6 +183,43 @@ position and no variety at all.
   page permanent.
 - Every health and stats write is fire-and-forget and non-throwing: a registry
   hiccup must never break or slow a real generation.
+- **Expiry** (`expires_at`) takes a row out of selection at an exact instant,
+  for a discount window worth riding only while it lasts, or a trial model on a
+  clock. `NULL` means permanent.
+
+### Keeping the pool current
+
+The catalog moves faster than anyone maintains a list by hand, and a stale price
+is not cosmetic: the monthly spend cap meters from it, so an under-reported
+price quietly raises the one ceiling that stops runaway spend. Prices therefore
+live on the registry row, not in an env map, and `.github/workflows/model-review.yml`
+runs `scripts/review-models.ts` daily to keep them honest.
+
+The job splits its authority. It **applies on its own**: price syncs, and
+disabling models that expired, died (absent from the provider's catalog), or
+spiked past a price barrier — all of which only ever shrink the pool or correct
+a number. It **proposes, and waits**, for anything that would grow the pool or
+spend more, recording those to `model_proposals` for the checkbox queue on
+`/operator`. One Telegram digest carries both, with the same reasoning the
+dashboard shows.
+
+Two rails matter more than the feature. A **floor guard** stops auto-disabling
+at 3 generation models and 1 moderation link, so one bad catalog response can't
+take the library dark unattended — a breach is escalated as an urgent proposal
+instead. And **every failure alerts**, in the script and again in the workflow:
+a cron nobody hears from is a cron that has been broken for weeks.
+
+New candidates come from OpenRouter's daily usage rankings through four hard
+gates — is it a prose model we can actually drive, is anyone using it, is it
+growing, is it cheaper than what we run — and are only ever proposed as
+time-boxed trials. The rankings say what the market thinks; only `model_signals`
+(dwell, like ratio) can say what our readers think, and a trial is how one
+becomes the other. Trials expire on their own, so an unread digest can never
+permanently widen the pool.
+
+The decision rules all live in `lib/modelReview.ts`, which is pure — no fetch,
+no database, no clock of its own — and unit-tested offline. That is what makes a
+job with unattended authority over production models safe to ship.
 
 The prompt (`lib/prompts.ts`) is treated as a first-class artifact. Entropy
 levers — temperature jitter, model mixing, and a probabilistic constraints pool
