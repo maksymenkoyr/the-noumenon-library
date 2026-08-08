@@ -25,6 +25,10 @@ import { config } from "./config";
  *   - `moderation_disabled_in_production` (lib/moderate.ts) — the fail-closed
  *     guard found moderation off in a production deploy.
  *   - `model_unavailable` (lib/registry.ts) — a registered model can't be used.
+ *   - `model_pool_decided` (lib/modelProposals.ts) — an operator applied or
+ *     dismissed model-pool proposals. Not a failure: it's the durable record of
+ *     a change to which models write the library, which Hobby's absent log
+ *     history would otherwise lose.
  *   - `page_reported` (app/api/report/route.ts) — a reader filed a report.
  *   - `report_email_failed` (lib/reportEmail.ts) — the report notification
  *     couldn't be delivered.

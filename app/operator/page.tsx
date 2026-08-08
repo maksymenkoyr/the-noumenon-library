@@ -12,8 +12,10 @@ import {
   type PageSignal,
   type VariantSignal,
 } from "@/lib/insights";
+import { listPendingProposals } from "@/lib/modelProposals";
 import { getOperatorMode } from "@/lib/operatorMode";
 import { listOpenReports, type PageReport } from "@/lib/reports";
+import { ProposalsPanel } from "./proposals-panel";
 import { ResolveButton } from "./resolve-button";
 
 // The operator-gated review surface (docs/reference/architecture.md §8, Phase 10):
@@ -53,9 +55,10 @@ export default async function OperatorPage() {
   await connection();
   if (!(await getOperatorMode())) notFound();
 
-  const [reports, pageSignals, modelSignals, variantSignals, arrivalSignals] =
+  const [reports, proposals, pageSignals, modelSignals, variantSignals, arrivalSignals] =
     await Promise.all([
       listOpenReports(),
+      listPendingProposals(),
       getPageSignals(100),
       getModelSignals(),
       getVariantSignals(),
@@ -72,6 +75,7 @@ export default async function OperatorPage() {
       </header>
 
       <ReportsQueue reports={reports} />
+      <ProposalsPanel proposals={proposals} />
       <PageSignalsTable rows={pageSignals} />
       <ModelSignalsTable rows={modelSignals} />
       <VariantSignalsTable rows={variantSignals} />

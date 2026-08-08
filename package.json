@@ -2,6 +2,8 @@
   "name": "the-noumenon-library",
   "version": "0.1.0",
   "private": true,
+  "//type": "Every file here is already ESM (.ts/.tsx/.mjs; not one .js or .cjs in the repo). Declaring it stops Node re-parsing scripts/review-models.ts to guess, which it warns about on every run of the daily job.",
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -13,6 +15,7 @@
     "invite": "node --env-file=.env.local scripts/invite.mjs",
     "backup": "node --env-file-if-exists=.env.local scripts/backup.mjs",
     "restore:verify": "node --env-file-if-exists=.env.local scripts/restore-verify.mjs",
+    "models:review": "node --env-file-if-exists=.env.local scripts/review-models.ts",
     "wander": "node scripts/wander-sample.mjs",
     "deploy:prod": "git push origin main:prod"
   },

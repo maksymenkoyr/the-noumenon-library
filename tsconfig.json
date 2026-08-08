@@ -9,6 +9,12 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // scripts/review-models.ts runs on Node's native type stripping (node 24,
+    // no build step), whose ESM resolver has no extensionless lookup — it needs
+    // the literal "../lib/modelReview.ts" specifier that TS would otherwise
+    // reject. Safe here because noEmit is on: nothing rewrites these specifiers,
+    // so what tsc checks is exactly what Node loads.
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",

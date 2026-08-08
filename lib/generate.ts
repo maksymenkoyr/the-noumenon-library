@@ -233,6 +233,11 @@ export async function generatePage(
       ),
   ).map((row) => ({ slug: row.slug, provider: row.provider, maxTokens: row.maxTokens }));
 
+  // Live prices off the registry rows, synced daily from the provider catalogs
+  // (lib/modelReview.ts). Built from `pool` rather than `rest` so the model
+  // chooseLevers picked — which `rest` deliberately excludes — is priced too.
+  const poolPrices = new Map(pool.map((row) => [row.slug, row.pricePerMillion]));
+
   let attempts: Attempt[] = [
     { slug: levers.model, provider: levers.provider, maxTokens: levers.maxTokens },
     ...rest,
@@ -275,7 +280,12 @@ export async function generatePage(
       void markHealthy(attempt.slug, "generation");
 
       const tokens = response.usage?.total_tokens ?? 0;
-      const pricePerMillion = config.modelPrices[attempt.slug] ?? 0;
+      // MODEL_PRICES wins where it is set, so an operator can override a bad
+      // or missing catalog figure without a deploy; otherwise the synced row
+      // price. Absent from both (a free-tier model, or one the job hasn't
+      // reached) → 0, the long-standing convention.
+      const pricePerMillion =
+        config.modelPrices[attempt.slug] ?? poolPrices.get(attempt.slug) ?? 0;
       const costUsd = (tokens / 1_000_000) * pricePerMillion;
 
       devLog(`generate ${attempt.slug} → ${tokens} tokens in ${durationMs}ms`);

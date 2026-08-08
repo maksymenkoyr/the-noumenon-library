@@ -1,0 +1,69 @@
+name: Model pool review
+
+# Daily audit of model_registry against the providers' live catalogs and
+# OpenRouter's usage rankings (scripts/review-models.ts, lib/modelReview.ts).
+#
+# It applies the safe corrections on its own authority — repricing, and
+# disabling models that expired, died, or spiked past the price barrier, never
+# below the floor of 3 generation models / 1 moderation link — and records
+# everything that would grow the pool or spend more as a proposal for /operator.
+# One Telegram digest per run covers both.
+#
+# Credentials come from GitHub Actions secrets rather than Vercel, same as
+# migrate.yml and backup.yml: DB URLs are flagged Sensitive there, which makes
+# them write-only and unreadable afterwards.
+#
+# Requires repository secrets: DATABASE_URL_UNPOOLED (already present for
+# backups), GOOGLE_API_KEY (without it Google rows are skipped rather than
+# treated as dead), and TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (without them the
+# digest only reaches the run log, which nobody reads). Optional repository
+# variable OPERATOR_DASHBOARD_URL turns the digest's apply link into a real URL.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC daily — after the 03:00 backup, before the day starts
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print the digest without writing or notifying
+        type: boolean
+        default: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL_UNPOOLED }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      OPERATOR_DASHBOARD_URL: ${{ vars.OPERATOR_DASHBOARD_URL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          # 24, not the 20 the other workflows pin: scripts/review-models.ts is
+          # TypeScript executed directly by Node's native type stripping, so it
+          # can share lib/modelReview.ts with the app and its test suite instead
+          # of duplicating the rules in plain JS. Node 20 cannot run it.
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Review model pool
+        run: npm run models:review ${{ inputs.dry_run && '-- --dry-run' || '' }}
+      # The script pushes its own failure alert for anything it can catch. This
+      # is the backstop for what it cannot — a crash before the handler is
+      # reachable, an npm ci failure, a cancelled runner. Without it this job
+      # becomes the nightly backup: broken for weeks with nobody the wiser.
+      - name: Alert on failure
+        if: failure() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        run: |
+          MSG="⚠ Model pool review workflow failed: ${{ github.repository }} run ${{ github.run_id }}
+          https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # jq builds the JSON so quotes or newlines in the message can't
+          # produce a malformed body. Trailing `|| true`: a failed alert must
+          # not mask the failure that triggered it.
+          jq -n --arg chat_id "$TELEGRAM_CHAT_ID" --arg text "$MSG" \
+            '{chat_id: $chat_id, text: $text, disable_web_page_preview: true}' \
+            | curl -fsSL -X POST -H 'content-type: application/json' --data @- \
+              "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" || true

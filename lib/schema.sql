@@ -340,6 +340,36 @@ CREATE TABLE IF NOT EXISTS model_registry (
   PRIMARY KEY (slug, task)
 );
 
+-- Pricing and lifecycle, owned by the daily review job (lib/modelReview.ts,
+-- scripts/review-models.mjs). Additive/idempotent.
+--
+-- Price lives here rather than in the hand-maintained MODEL_PRICES env map
+-- (lib/config.ts) because the map cannot know it has gone stale, and the
+-- monthly spend cap (lib/economics.ts) is metered from it — a repriced model
+-- silently under-reports its own cost against the one rail that stops runaway
+-- spend. The job syncs `price_per_million` from each provider's live catalog;
+-- config's map stays supported as an explicit override for anything the
+-- catalog gets wrong or doesn't list.
+--
+-- `baseline_price` is the comparison point for the spike guard, not a
+-- historical low: it is stamped when a row is enabled, so "this model got 3x
+-- more expensive than when we chose it" is answerable without a price history
+-- table. NULL means never stamped — the guard skips the row rather than
+-- treating NULL as 0 and disabling everything.
+ALTER TABLE model_registry ADD COLUMN IF NOT EXISTS price_per_million NUMERIC;
+ALTER TABLE model_registry ADD COLUMN IF NOT EXISTS price_checked_at  TIMESTAMPTZ;
+ALTER TABLE model_registry ADD COLUMN IF NOT EXISTS baseline_price    NUMERIC;
+
+-- Time-boxed membership. `expires_at` NULL = permanent (every hand-seeded row);
+-- otherwise selection stops at that instant (lib/registry.ts poolFor) and the
+-- daily job disables the row. Two uses: a promotional/discount window worth
+-- riding only while it lasts, and `trial` rows — models the review job proposed
+-- from OpenRouter's usage rankings, which get a small weight and a fixed window
+-- to earn a place. A trial that nobody promotes expires on its own, so an
+-- unattended digest can never permanently widen the pool.
+ALTER TABLE model_registry ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE model_registry ADD COLUMN IF NOT EXISTS trial BOOLEAN NOT NULL DEFAULT false;
+
 -- Seed the pool. ON CONFLICT DO NOTHING makes this idempotent and
 -- override-friendly — an operator's manual UPDATE (e.g. flipping `enabled`
 -- or `health` by hand) survives a re-run of this file.
@@ -347,21 +377,26 @@ CREATE TABLE IF NOT EXISTS model_registry (
 -- Generation pool: temp 0.9 (the existing per-page jitter, config.ts, still
 -- applies on top), max_tokens 1000, reasoning off. Weighted lottery
 -- (lib/registry.ts chooseGenerationModel). Slugs verified against OpenRouter's
--- live GET /api/v1/models catalog (2026-07-12) except the two Google rows,
--- marked below.
+-- live GET /api/v1/models catalog (2026-07-12) and Google's native
+-- /v1beta/openai/models catalog (2026-08-02).
 INSERT INTO model_registry (slug, provider, task, enabled, weight, temperature, max_tokens, reasoning_enabled) VALUES
   ('deepseek/deepseek-v4-flash',     'openrouter', 'generation', true,  20, 0.9, 1000, false),
   ('moonshotai/kimi-k2.6',           'openrouter', 'generation', true,  20, 0.9, 1000, false),
   ('z-ai/glm-5.2',                   'openrouter', 'generation', true,  20, 0.9, 1000, false),
   ('anthropic/claude-haiku-4.5',     'openrouter', 'generation', true,  20, 0.9, 1000, false),
   ('mistralai/mistral-large-2512',   'openrouter', 'generation', true,  10, 0.9, 1000, false),
-  -- Gemini 3 Flash: slug UNVERIFIED against Google's native /v1beta/openai/models
-  -- catalog (no GOOGLE_API_KEY was available at seed time) — seeded disabled
-  -- pending live resolution (docs/architecture.md §6, model-pool rework §1/§5).
-  -- Flip `enabled` true once the slug is confirmed.
-  ('gemini-3-flash',                 'google',     'generation', false, 10, 0.9, 1000, false),
+  -- Gemini 3 Flash Preview: resolved live (2026-08-02). The originally seeded
+  -- `gemini-3-flash` does not exist — Google returns 404 NOT_FOUND for it — and
+  -- is dropped by the fix-ups below. `-preview` is the real slug, and it was
+  -- verified to accept the exact `reasoning_effort: "none"` that
+  -- lib/providers.ts reasoningParams() sends unconditionally (several newer
+  -- Gemini slugs 400 on that value and are therefore unusable here).
+  ('gemini-3-flash-preview',         'google',     'generation', true,  10, 0.9, 1000, false),
   ('anthropic/claude-sonnet-5',      'openrouter', 'generation', false, 0,  0.9, 1000, false),
-  ('anthropic/claude-opus-4.8',      'openrouter', 'generation', false, 0,  0.9, 1000, false)
+  -- Escape hatches, off by default: only reachable by a deliberate operator
+  -- UPDATE. claude-opus-5 supersedes the originally seeded claude-opus-4.8 at
+  -- identical pricing ($5/$25); the 4.8 row is dropped by the fix-ups below.
+  ('anthropic/claude-opus-5',        'openrouter', 'generation', false, 0,  0.9, 1000, false)
 ON CONFLICT (slug, task) DO NOTHING;
 
 -- Moderation chain: temp 0, max_tokens 5, reasoning off. Walked in `order`
@@ -378,10 +413,90 @@ ON CONFLICT (slug, task) DO NOTHING;
 -- degrades to explore-only rather than throwing. Cost is negligible at
 -- max_tokens=5.
 INSERT INTO model_registry (slug, provider, task, enabled, "order", temperature, max_tokens, reasoning_enabled) VALUES
-  -- Gemini 3.1 Flash-Lite: same UNVERIFIED-slug caveat as the generation row
-  -- above; also seeded disabled pending live resolution.
-  ('gemini-3.1-flash-lite',        'google',     'moderation', false, 1, 0, 5, false),
+  -- Gemini 3.1 Flash-Lite: slug resolved live (2026-08-02) and verified to
+  -- accept `reasoning_effort: "none"`. At `order` 1 it fields every first-visit
+  -- verdict ahead of Haiku — deliberate: it is free-tier on Google's native
+  -- API, so the common path costs nothing and the paid links below become the
+  -- fallback they were always meant to be.
+  ('gemini-3.1-flash-lite',        'google',     'moderation', true,  1, 0, 5, false),
   ('anthropic/claude-haiku-4.5',   'openrouter', 'moderation', true,  2, 0, 5, false),
   ('mistralai/mistral-large-2512', 'openrouter', 'moderation', true,  3, 0, 5, false),
   ('deepseek/deepseek-v4-flash',   'openrouter', 'moderation', true,  4, 0, 5, false)
 ON CONFLICT (slug, task) DO NOTHING;
+
+-- Pool fix-ups (2026-08-02). The seeds above are ON CONFLICT DO NOTHING, which
+-- is what lets an operator's hand-edit survive a re-run — and equally what
+-- makes editing a seed's VALUES a silent no-op on any database that already
+-- has the row. Anything that must change on an EXISTING database has to be
+-- stated as its own idempotent statement, here. Same posture as the
+-- redeemed_ip backfill further up this file.
+--
+-- Dead slug: Google 404s on `gemini-3-flash` (verified live). It was seeded
+-- disabled in production, so this drops a row that never ran; on any database
+-- where it was enabled by hand, this is the fix.
+DELETE FROM model_registry WHERE slug = 'gemini-3-flash';
+-- Superseded by claude-opus-5 above at identical pricing. Safe to drop
+-- outright: the row was seeded disabled at weight 0, so nothing selected it.
+DELETE FROM model_registry WHERE slug = 'anthropic/claude-opus-4.8';
+-- Both Google rows were seeded disabled pending slug verification. They are
+-- verified now, so turn them on where they are still sitting at the seeded
+-- default. Scoped to health <> 'unavailable' so this never resurrects a row
+-- that lib/registry.ts markUnavailable() has since retired.
+UPDATE model_registry SET enabled = true
+ WHERE slug IN ('gemini-3-flash-preview', 'gemini-3.1-flash-lite')
+   AND provider = 'google'
+   AND enabled = false
+   AND health <> 'unavailable';
+
+-- Seed prices, so the spend cap meters correctly and the spike guard has a
+-- baseline from the first run rather than the first *successful* catalog fetch.
+-- Blended $/M output tokens, read off the live catalogs 2026-08-02. Google's
+-- rows are free-tier and intentionally absent → they stay NULL and price at 0,
+-- same convention as MODEL_PRICES.
+--
+-- Idempotent by `IS NULL`, and that guard is load-bearing in both directions:
+-- re-running never clobbers a price the daily job has since synced, and never
+-- resets a baseline to a stale figure — which would silently re-arm the spike
+-- guard against the wrong reference and disable a model we already accepted.
+UPDATE model_registry AS m SET
+  price_per_million = COALESCE(m.price_per_million, seed.price),
+  baseline_price    = COALESCE(m.baseline_price, seed.price)
+FROM (VALUES
+  ('deepseek/deepseek-v4-flash',   0.28),
+  ('moonshotai/kimi-k2.6',         2.48),
+  ('z-ai/glm-5.2',                 3.52),
+  ('anthropic/claude-haiku-4.5',   5.00),
+  ('mistralai/mistral-large-2512', 1.50),
+  ('anthropic/claude-sonnet-5',   10.00),
+  ('anthropic/claude-opus-5',     25.00)
+) AS seed(slug, price)
+WHERE m.slug = seed.slug
+  AND (m.price_per_million IS NULL OR m.baseline_price IS NULL);
+
+-- Proposals raised by the daily review job and awaiting an operator decision
+-- (app/operator, app/api/operator/apply-models). One row per proposed change
+-- per run: the Telegram digest and the dashboard render the same records, so
+-- what the message described is exactly what the Apply button applies.
+--
+-- `action` is the verb the apply route dispatches on; `payload` carries its
+-- arguments (target weight, expires_at, replacement slug…) so a new proposal
+-- kind needs no migration. `status` starts 'pending' and is terminal
+-- thereafter — applied/rejected/superseded rows are kept as the audit trail of
+-- what the pool was asked to become and what a human actually said to it.
+CREATE TABLE IF NOT EXISTS model_proposals (
+  id          BIGSERIAL PRIMARY KEY,
+  run_id      UUID NOT NULL,               -- groups one job run's proposals
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  slug        TEXT NOT NULL,
+  provider    TEXT NOT NULL,
+  task        TEXT NOT NULL,
+  action      TEXT NOT NULL,               -- 'add_trial'|'promote'|'drop'|'swap'|'reprice'|'enable'|'disable'
+  reason      TEXT NOT NULL,               -- human-readable, shown verbatim in the digest
+  payload     JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status      TEXT NOT NULL DEFAULT 'pending', -- 'pending'|'applied'|'rejected'|'superseded'
+  decided_at  TIMESTAMPTZ
+);
+
+-- The dashboard's only hot query is "pending proposals, newest run first".
+CREATE INDEX IF NOT EXISTS model_proposals_pending_idx
+  ON model_proposals (created_at DESC) WHERE status = 'pending';

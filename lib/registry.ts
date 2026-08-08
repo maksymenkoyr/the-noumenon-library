@@ -24,6 +24,13 @@ export interface RegistryRow {
   order: number;
   temperature: number;
   maxTokens: number;
+  /**
+   * $/M tokens for the spend counter, synced from the provider catalog by the
+   * daily review job. `undefined` where the row has no price — a free-tier
+   * model, or one the job has not reached yet — and the caller prices it at 0,
+   * the same convention MODEL_PRICES has always used.
+   */
+  pricePerMillion?: number;
 }
 
 interface RegistryDbRow {
@@ -34,9 +41,15 @@ interface RegistryDbRow {
   order: number;
   temperature: number;
   max_tokens: number;
+  price_per_million: string | number | null;
 }
 
 function fromDbRow(row: RegistryDbRow): RegistryRow {
+  // NUMERIC arrives from pg as a string (it is arbitrary-precision, so the
+  // driver refuses to silently narrow it to a float). Convert here, once, and
+  // treat anything unparseable as absent rather than NaN — a NaN price would
+  // poison the spend counter's running total.
+  const price = row.price_per_million === null ? NaN : Number(row.price_per_million);
   return {
     slug: row.slug,
     provider: row.provider,
@@ -45,6 +58,7 @@ function fromDbRow(row: RegistryDbRow): RegistryRow {
     order: row.order,
     temperature: row.temperature,
     maxTokens: row.max_tokens,
+    pricePerMillion: Number.isFinite(price) ? price : undefined,
   };
 }
 
@@ -54,15 +68,24 @@ function fromDbRow(row: RegistryDbRow): RegistryRow {
  * passed — lazy recovery, no probe cron; the next real request just tries
  * again (extending the cooldown if it 429s again). `unavailable` rows never
  * come back (a 404 is permanent) and are always excluded.
+ *
+ * `expires_at` is the third exclusion and the only one that is a deliberate
+ * plan rather than a fault: a discount window that has closed, or a trial model
+ * whose two weeks are up. It is enforced here rather than left to the daily job
+ * so the window is exact — the row stops being selectable the instant it
+ * lapses, not at the next 06:00 UTC run. The job's later `enabled = false` is
+ * bookkeeping that makes the same fact visible on the dashboard.
  */
 export async function poolFor(task: Task): Promise<RegistryRow[]> {
   const rows = await query<RegistryDbRow>(
-    `SELECT slug, provider, task, weight, "order", temperature, max_tokens
+    `SELECT slug, provider, task, weight, "order", temperature, max_tokens,
+            price_per_million
      FROM model_registry
      WHERE task = $1
        AND enabled = true
        AND health <> 'unavailable'
-       AND (health <> 'cooling' OR cooling_until <= now())`,
+       AND (health <> 'cooling' OR cooling_until <= now())
+       AND (expires_at IS NULL OR expires_at > now())`,
     [task],
     "registry.poolFor",
   );

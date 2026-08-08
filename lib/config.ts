@@ -47,15 +47,20 @@ function list(name: string, fallback: string[]): string[] {
 
 /**
  * Parse a `modelId@usdPerMillionTokens` list into a price map for the spend
- * counter (docs/reference/architecture.md §10). `@` is the separator (model ids never
- * contain it). A model absent from the map prices at 0 — correct for Google's
- * free-tier models. `fallback` seeds the default paid-model prices (the
- * model_registry seed's paid rows, lib/schema.sql) so the spend cap meters
- * real cost out of the box, without requiring an env override.
+ * counter (docs/reference/architecture.md §10). `@` is the separator (model ids
+ * never contain it).
  *
- * TODO(model-pool follow-up): this map is hand-maintained and will silently
- * under-report if a model is repriced upstream or loses a free tag — live
- * catalog pricing is a separate, not-yet-built task.
+ * This map is an OVERRIDE, not the source of truth. Prices live on the
+ * model_registry row (`price_per_million`), synced daily from each provider's
+ * live catalog by lib/modelReview.ts, and lib/generate.ts consults this map
+ * first and the row second. That ordering is the point: MODEL_PRICES exists so
+ * an operator can correct a figure the catalog gets wrong, or price a model the
+ * catalog doesn't list, without waiting on a deploy — and it is empty by
+ * default so nothing here can shadow the synced value.
+ *
+ * (It used to carry hand-maintained defaults for every paid seed row, which is
+ * exactly how `z-ai/glm-5.2` came to be metered at $1.32 against a live $3.52 —
+ * a 2.7x under-report on the one counter that enforces the spend cap.)
  */
 function parseModelPrices(
   name: string,
@@ -77,20 +82,6 @@ function parseModelPrices(
   }
   return prices;
 }
-
-// Default prices for the paid rows seeded into model_registry (lib/schema.sql)
-// — single blended $/M-output-tokens figures, verified against OpenRouter's
-// live /api/v1/models catalog (2026-07-12). Google's free-tier models
-// (Gemini 3 Flash, Gemini 3.1 Flash-Lite) are intentionally absent → price 0.
-const DEFAULT_MODEL_PRICES = [
-  "deepseek/deepseek-v4-flash@0.15",
-  "moonshotai/kimi-k2.6@3.41",
-  "z-ai/glm-5.2@1.32",
-  "anthropic/claude-haiku-4.5@5.00",
-  "mistralai/mistral-large-2512@1.50",
-  "anthropic/claude-sonnet-5@10.00",
-  "anthropic/claude-opus-4.8@25.00",
-];
 
 export const config = {
   // Provider keys (docs/reference/architecture.md §6, lib/providers.ts). Both are
@@ -163,9 +154,10 @@ export const config = {
   // Optional salt for the stored IP hash so it can't be reversed via a rainbow
   // table of the (small) address space. Empty = unsalted (still not the raw IP).
   rateLimitSalt: process.env.RATE_LIMIT_SALT ?? "",
-  // Per-model price (USD per million tokens) for the spend counter — see
-  // DEFAULT_MODEL_PRICES above for the interim-pricing rationale and TODO.
-  modelPrices: parseModelPrices("MODEL_PRICES", DEFAULT_MODEL_PRICES),
+  // Per-model price (USD per million tokens) for the spend counter. Empty by
+  // default: the registry row is the source of truth, this only overrides it.
+  // See parseModelPrices above.
+  modelPrices: parseModelPrices("MODEL_PRICES"),
   // Optional Telegram bot for monitor() alerts — generation/moderation/DB
   // failures (docs/reference/architecture.md §9, Phase 7). Both unset → structured
   // JSON logs only, no push. Never let alerting break a request. Accessors (not
