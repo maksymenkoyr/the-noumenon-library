@@ -328,7 +328,7 @@ CREATE TABLE IF NOT EXISTS model_stats (
 CREATE TABLE IF NOT EXISTS model_registry (
   slug              TEXT NOT NULL,               -- provider's model id
   provider          TEXT NOT NULL,               -- 'openrouter' | 'google'
-  task              TEXT NOT NULL,               -- 'generation' | 'moderation'
+  task              TEXT NOT NULL,               -- 'generation' | 'moderation' | 'reader'
   enabled           BOOLEAN NOT NULL DEFAULT true,
   weight            INTEGER NOT NULL DEFAULT 0,  -- generation only: weighted-lottery share
   "order"           INTEGER NOT NULL DEFAULT 0,  -- moderation only: chain position
@@ -384,4 +384,21 @@ INSERT INTO model_registry (slug, provider, task, enabled, "order", temperature,
   ('anthropic/claude-haiku-4.5',   'openrouter', 'moderation', true,  2, 0, 5, false),
   ('mistralai/mistral-large-2512', 'openrouter', 'moderation', true,  3, 0, 5, false),
   ('deepseek/deepseek-v4-flash',   'openrouter', 'moderation', true,  4, 0, 5, false)
+ON CONFLICT (slug, task) DO NOTHING;
+
+-- Reader pool (scripts/read-eval.mts, lib/reading/*, docs/reference/experience.md
+-- "Success bar"): the model that simulates a staged, context-bounded read of
+-- an already-stored page for the reading-simulation eval. Chain semantics
+-- reuse "order" the same way moderation does — first eligible row wins
+-- (scripts/read-eval.mts resolveReaderModel) — but there is no per-task
+-- meaning behind weight/reasoning_enabled here; both stay at their column
+-- defaults. Deliberately a STRONG model: a cheap reader would produce exactly
+-- the agreeable, undiscriminating output the whole staged-reading design
+-- exists to avoid. temperature/max_tokens are the reading-stage defaults;
+-- scripts/read-eval.mts fixes the separate page-blind verdict call's
+-- temperature to 0 regardless of this row (an adjudicator should be stable;
+-- a reader is one draw from a distribution).
+INSERT INTO model_registry (slug, provider, task, enabled, "order", temperature, max_tokens, reasoning_enabled) VALUES
+  ('anthropic/claude-sonnet-5', 'openrouter', 'reader', true,  1, 0.7, 500, false),
+  ('z-ai/glm-5.2',              'openrouter', 'reader', false, 2, 0.7, 500, false)
 ON CONFLICT (slug, task) DO NOTHING;
