@@ -43,6 +43,7 @@ next-env.d.ts
 
 # local artifacts: success-bar eval samples, backup dumps
 wander-*.md
+read-eval-*.md
 *.dump
 docs/
 
