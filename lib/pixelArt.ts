@@ -9,15 +9,14 @@
  *
  * `runs()` merges each row into horizontal pixel runs before rendering, so a
  * wide silhouette becomes a few hundred SVG rects instead of one per cell.
+ * The merge itself is shared with lib/pixelCanvas.ts (a drawn buffer, for
+ * geometry text art can't express) via lib/pixelRuns.ts.
  */
 
-export type Frame = readonly string[];
+import { mergeRowRuns, type PixelRun } from "./pixelRuns";
 
-export interface PixelRun {
-  x: number;
-  y: number;
-  w: number;
-}
+export type { PixelRun };
+export type Frame = readonly string[];
 
 const LIT = "#";
 
@@ -28,16 +27,7 @@ const LIT = "#";
 export function runs(frame: Frame): PixelRun[] {
   const out: PixelRun[] = [];
   frame.forEach((row, y) => {
-    let x = 0;
-    while (x < row.length) {
-      if (row[x] !== LIT) {
-        x++;
-        continue;
-      }
-      const start = x;
-      while (x < row.length && row[x] === LIT) x++;
-      out.push({ x: start, y, w: x - start });
-    }
+    mergeRowRuns(y, row.length, (x) => row[x] === LIT, out);
   });
   return out;
 }
