@@ -65,7 +65,7 @@ const openSweep: PixelRun[][] = [];
 for (let i = 0; i < OPEN_STEPS; i++) {
   const t = i / (OPEN_STEPS - 1);
   const c = new PixelCanvas(STAGE_SIZE, STAGE_SIZE);
-  drawOpenSpread(c, t, settleScrollX);
+  drawOpenSpread(c, t, settleScrollX, HERO_INDEX);
   openSweep.push(c.toRuns());
 }
 

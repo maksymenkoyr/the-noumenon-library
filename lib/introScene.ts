@@ -29,7 +29,7 @@ export const STAGE_SIZE = 160;
 /** The top face's offset from the front face — the one number every skewed
     shape in this file derives from, so the whole scene reads as one
     consistent camera angle. */
-export const SKEW = { dx: 8, dy: -5 } as const;
+export const SKEW = { dx: 8, dy: -11 } as const;
 
 const SHELF_Y = 134; // books' front faces stand on this line
 const BOARD_THICKNESS = 4;
@@ -228,13 +228,17 @@ function drawShelfBooks(
 }
 
 /** Panel 1: the shelf, panning. `scrollX` is world-space pixels scrolled;
-    the shelf loops seamlessly regardless of its value. */
+    the shelf loops seamlessly regardless of its value. `omitIndex` leaves
+    one book's slot empty — used once a book has come off the shelf
+    (drawPulledBook, drawOpenSpread), so it doesn't appear to still be
+    standing in its row at the same time as it's shown pulled or open. */
 export function drawShelf(
   canvas: PixelCanvas,
   scrollX: number,
   layout: ShelfLayout = shelfLayout(),
+  omitIndex?: number,
 ): void {
-  drawShelfBooks(canvas, scrollX, layout);
+  drawShelfBooks(canvas, scrollX, layout, omitIndex);
   drawShelfBoard(canvas, -SKEW.dx, canvas.width + SKEW.dx, SHELF_Y);
 }
 
@@ -242,22 +246,23 @@ export function drawShelf(
     seated among its neighbors — a hard cut from drawShelf, not an
     in-between animated state (this style hard-cuts between states; only
     drawOpenSpread's push-in is continuous). "Forward, toward the camera" is
-    the reverse of the direction a top face recedes, so the shift reuses
-    SKEW itself rather than a new constant. */
+    the reverse of the direction a top face recedes — horizontally only; the
+    book still sits on the shelf line, so its own yTop is untouched (shifting
+    it by SKEW.dy too would sink its bottom edge below the shelf board, as
+    it did before this was caught). */
 export function drawPulledBook(
   canvas: PixelCanvas,
   scrollX: number,
   pulledIndex: number,
   layout: ShelfLayout = shelfLayout(),
 ): void {
-  drawShelfBooks(canvas, scrollX, layout, pulledIndex);
-  drawShelfBoard(canvas, -SKEW.dx, canvas.width + SKEW.dx, SHELF_Y);
+  drawShelf(canvas, scrollX, layout, pulledIndex);
 
   const book = layout.books.find((b) => b.index === pulledIndex);
   if (!book) return;
   const sx = ((scrollX % layout.worldWidth) + layout.worldWidth) % layout.worldWidth;
   const screenX = book.x - sx;
-  drawBook(canvas, screenX - SKEW.dx, book.yTop - SKEW.dy, book);
+  drawBook(canvas, screenX - SKEW.dx, book.yTop, book);
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -315,9 +320,11 @@ function drawPage(
     a hard cut. The shelf is drawn every time regardless of `t`; it isn't
     faded out, it's simply covered more as the growing pages occlude it,
     matching the storyboard's shelf-still-visible-behind panels without any
-    opacity trick. */
-export function drawOpenSpread(canvas: PixelCanvas, t: number, scrollX = 0): void {
-  drawShelf(canvas, scrollX);
+    opacity trick. `omitIndex` should be the same book drawPulledBook just
+    stepped forward — otherwise it reads as still standing in its shelf slot
+    while also shown open in front of it. */
+export function drawOpenSpread(canvas: PixelCanvas, t: number, scrollX = 0, omitIndex?: number): void {
+  drawShelf(canvas, scrollX, shelfLayout(), omitIndex);
 
   const yTop = lerp(OBLIQUE_SPREAD.yTop, FLAT_SPREAD.yTop, t);
   const yBot = lerp(OBLIQUE_SPREAD.yBot, FLAT_SPREAD.yBot, t);
