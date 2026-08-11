@@ -33,7 +33,12 @@ export const SKEW = { dx: 8, dy: -5 } as const;
 
 const SHELF_Y = 134; // books' front faces stand on this line
 const BOARD_THICKNESS = 4;
-const SPINE_GAP = 5;
+// A book's top face extends SKEW.dx sideways past its own front face — the
+// gap between neighbors has to clear that plus some breathing room, or a
+// shorter book's top face closes inside its taller neighbor's silhouette
+// instead of on its own, reading as a missing back edge. Derived from SKEW
+// itself rather than a separate literal, so the two can't drift apart again.
+const SPINE_GAP = SKEW.dx + 5;
 const SHELF_MARGIN = 10;
 
 export type Emblem = "none" | "diamond" | "circle";

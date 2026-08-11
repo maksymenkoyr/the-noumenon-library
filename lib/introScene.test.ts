@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PixelCanvas } from "./pixelCanvas";
 import {
+  SKEW,
   STAGE_SIZE,
   drawOpenSpread,
   drawPulledBook,
@@ -23,6 +24,18 @@ describe("shelfLayout", () => {
     // The whole point of a scroll loop: there must be more shelf than one
     // screenful, or panning would just show the same books immediately.
     expect(worldWidth).toBeGreaterThan(STAGE_SIZE * 2);
+  });
+
+  it("gives every book's top face room to close before the next book starts", () => {
+    // A book's top face reaches SKEW.dx past its own front face (the back
+    // edge). If that lands inside the next book's own front-face x-range,
+    // the top face closes inside the neighbor's silhouette instead of on
+    // its own — reads as a missing back edge, not an overlap.
+    const { books } = shelfLayout();
+    for (let i = 1; i < books.length; i++) {
+      const prevBackRightX = books[i - 1].x + books[i - 1].w + SKEW.dx;
+      expect(prevBackRightX).toBeLessThanOrEqual(books[i].x);
+    }
   });
 });
 
