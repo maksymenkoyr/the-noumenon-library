@@ -25,3 +25,59 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
+
+/*
+ * The first-visit intro (app/[[...address]]/intro.tsx): hidden outright for
+ * anyone the blocking inline script in app/layout.tsx has already marked as
+ * having seen it (lib/introSeen.ts), so a returning visitor's full-page-load
+ * navigation never flashes it on and off.
+ */
+html[data-intro-seen] .intro-overlay {
+  display: none;
+}
+
+/*
+ * The idle loop's two-frame twinkle, a hard cut rather than a fade — no
+ * gradient in time to match none in space. Runs however long generation
+ * takes; app/[[...address]]/intro.tsx switches to its JS-stepped opening
+ * sequence once the real page arrives.
+ */
+@keyframes intro-idle-a {
+  0%,
+  49.9% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes intro-idle-b {
+  0%,
+  49.9% {
+    opacity: 0;
+  }
+  50%,
+  100% {
+    opacity: 1;
+  }
+}
+.intro-idle-a {
+  animation: intro-idle-a 1.4s infinite;
+}
+.intro-idle-b {
+  animation: intro-idle-b 1.4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-idle-a,
+  .intro-idle-b {
+    animation: none;
+  }
+  .intro-idle-a {
+    opacity: 1;
+  }
+  .intro-idle-b {
+    opacity: 0;
+  }
+}

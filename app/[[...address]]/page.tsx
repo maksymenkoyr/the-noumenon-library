@@ -16,6 +16,8 @@ import type { PromptSegment } from "@/lib/prompts";
 import { devFields, resolvePage, type ResolvedPage } from "@/lib/resolvePage";
 import { getPage } from "@/lib/store";
 import { DevBadge } from "./dev-badge";
+import { Intro } from "./intro";
+import { PageArrivedSignal } from "./intro-signal";
 import { CrystallizingPage, PageContent, PlaceholderPage } from "./page-content";
 import { Marks } from "./marks";
 import { Nav } from "./nav";
@@ -61,6 +63,7 @@ export default async function Page({
 
   return (
     <main className="mx-auto flex w-full max-w-2xl grow flex-col gap-8 p-8">
+      <Intro />
       <header className="flex items-baseline gap-4 font-mono text-sm text-neutral-500">
         <span className="shrink-0">{canonical}</span>
         <Nav nextHref={nextHref} />
@@ -203,6 +206,7 @@ async function CommittedPage({
   const likeCount = await getLikeCount(address);
   return (
     <>
+      <PageArrivedSignal />
       <PageContent>{text}</PageContent>
       {devMode && (
         <DevBadge
