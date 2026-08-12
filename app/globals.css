@@ -25,3 +25,13 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Belt-and-suspenders for app/[[...address]]/intro.tsx: the component
+   itself checks matchMedia in a layout effect before its first paint, but
+   that's a JS-timing guarantee — this CSS rule also covers the brief
+   window (or a no-JS fallback) before hydration runs. */
+@media (prefers-reduced-motion: reduce) {
+  .intro-overlay {
+    display: none;
+  }
+}
