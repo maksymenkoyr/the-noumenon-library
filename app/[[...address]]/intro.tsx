@@ -188,7 +188,7 @@ export function Intro() {
         ref={skipRef}
         type="button"
         onClick={dismiss}
-        className="font-mono text-[13px] tracking-wide text-[rgba(239,233,220,0.55)] hover:text-[rgba(239,233,220,0.9)]"
+        className="rounded-sm font-mono text-[13px] tracking-wide text-[rgba(239,233,220,0.55)] outline-none hover:text-[rgba(239,233,220,0.9)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[rgba(169,182,200,0.65)]"
         style={{
           position: "fixed",
           left: "50%",
