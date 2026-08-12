@@ -60,12 +60,12 @@ export function Report({
 }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const [sending, setSending] = useState(false);
   const reported = useReported(address);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    setOpen(false);
-    writeReported(address); // flips `reported` via the external store
+    setSending(true);
     fetch("/api/report", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -74,9 +74,24 @@ export function Report({
         ...(reason.trim() ? { reason: reason.trim() } : {}),
       }),
       keepalive: true,
-    }).catch(() => {
-      /* best-effort; the operator mailto remains */
-    });
+    })
+      .then(async (res) => {
+        // Only claim success once the server has actually accepted the
+        // report — an access-gate 401, a bad-address 400, or a throttled
+        // `{ok:false}` (still HTTP 200, app/api/report/route.ts) must not
+        // render the same "thank you" as a real insert, or the reader (and
+        // this browser, forever) never finds out it didn't land.
+        if (!res.ok) return;
+        const body: unknown = await res.json().catch(() => null);
+        if ((body as { ok?: boolean } | null)?.ok) {
+          setOpen(false);
+          writeReported(address); // flips `reported` via the external store
+        }
+      })
+      .catch(() => {
+        /* best-effort; the operator mailto remains */
+      })
+      .finally(() => setSending(false));
   }
 
   return (
@@ -92,17 +107,20 @@ export function Report({
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             maxLength={500}
+            disabled={sending}
             className="min-w-0 flex-1 border-b border-neutral-300 bg-transparent pb-0.5 outline-none placeholder:text-neutral-400 focus:border-neutral-500 dark:border-neutral-700"
           />
           <button
             type="submit"
+            disabled={sending}
             className="shrink-0 hover:text-neutral-800 dark:hover:text-neutral-200"
           >
-            send
+            {sending ? "sending…" : "send"}
           </button>
           <button
             type="button"
             onClick={() => setOpen(false)}
+            disabled={sending}
             className="shrink-0 hover:text-neutral-800 dark:hover:text-neutral-200"
           >
             cancel
