@@ -21,12 +21,11 @@ import { animate, clamp, Easing, interpolate, type SceneName } from "@/lib/compo
 
 const INK = "#0a0c11";
 const PAPER = "#efe9dc";
-// The site's own reading serif (Lora, app/layout.tsx) — its .variable class
-// is on <html>, so it's already in scope here without intro.tsx doing
-// anything; the narration speaks in the same face every page is set in.
-const SERIF = "var(--font-serif), Georgia, serif";
-// This one *is* wired through intro.tsx (intro-fonts.ts's `.variable`
-// applied to the stage wrapper) — it's scoped to this route, not global.
+// All narration — the resolving hero line (Page, below), "somewhere in all
+// that noise", and the five titles — sets this one face, so the titles read
+// as made of the same material as the text that locks in out of the noise
+// rather than as separate UI captions. Wired through intro.tsx
+// (intro-fonts.ts's `.variable` applied to the stage wrapper).
 const MONO = "var(--font-intro-mono), 'Noto Sans Mono', ui-monospace, monospace";
 
 // Last-saved values from Library of Babel.dc.html's TWEAK_DEFAULTS — the
@@ -510,7 +509,7 @@ export function IntroScene() {
               right: 0,
               top: "11%",
               textAlign: "center",
-              font: "italic 400 44px " + SERIF,
+              font: "400 44px " + MONO,
               color: PAPER,
               letterSpacing: "0.01em",
               opacity: MOTION.hold(T, CUES.Pages + 0.9, CUES.Everything - 0.4, 0.55),
@@ -532,7 +531,7 @@ export function IntroScene() {
                   left: x,
                   top: y,
                   transform: "translate(-50%,0)",
-                  font: "italic 400 33px " + SERIF,
+                  font: "400 33px " + MONO,
                   color: PAPER,
                   whiteSpace: "nowrap",
                   opacity: p,
