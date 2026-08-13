@@ -119,6 +119,13 @@ interface TextSpec {
  * would land on a space. Keep `len` equal to the string's length; frac()
  * uses it to stagger each character's lock time across the line.
  */
+// When the hero glyph locks in — the opening move of the whole piece.
+// Still comfortably inside the Glyph scene's authored window (T < 3.5,
+// where z is still ≈20+, i.e. still a tight close-up), so pushing it later
+// doesn't spill into the pull-back. Referenced again below, in Page, to
+// gate how long the hero column's own pre-reveal churn avoids this glyph.
+const HERO_REVEAL_AT = 3.1;
+
 const TEXTS: TextSpec[] = [
   {
     t: padded("any symbol, in any order", 23),
@@ -128,7 +135,7 @@ const TEXTS: TextSpec[] = [
     to: 9.0,
     out: 11.5,
     outTo: 12.6,
-    heroAt: 2.1,
+    heroAt: HERO_REVEAL_AT,
   },
   {
     t: padded("every page that could ever be written is already here", 8),
@@ -156,6 +163,18 @@ function prand(n: number): number {
 }
 function pick(n: number): string {
   return NOISE[Math.floor(prand(n) * NOISE.length) % NOISE.length];
+}
+
+// The glyph the hero column locks onto at HERO_REVEAL_AT (see TEXTS above).
+// Before that, the hero column is still just churning noise like every
+// other cell (below, in Page) — but pick() drawing this exact glyph by
+// chance during that churn would pre-empt the one moment the whole piece
+// opens on. NOISE_NO_HERO_CHAR removes it from the draw entirely, rather
+// than just making it unlikely, so the reveal is never scooped.
+const HERO_CHAR = TEXTS[0].t[HERO];
+const NOISE_NO_HERO_CHAR = NOISE.split("").filter((c) => c !== HERO_CHAR).join("");
+function pickHeroChurn(n: number): string {
+  return NOISE_NO_HERO_CHAR[Math.floor(prand(n) * NOISE_NO_HERO_CHAR.length) % NOISE_NO_HERO_CHAR.length];
 }
 const WIDE_RE = /[぀-ヿ㐀-鿿豈-﫿＀-￯가-힯]/;
 function frac(tx: TextSpec, j: number): number {
@@ -298,8 +317,14 @@ function Page({
           if (T >= lock && T < unlock) ch = tx.t[j];
         }
         const locked = ch !== null;
-        if (!locked) ch = pick(i * 97.13 + j * 3.71 + fast * 131.7);
         const hero = j === HERO;
+        if (!locked) {
+          const seed = i * 97.13 + j * 3.71 + fast * 131.7;
+          // Only the hero column, and only before its own reveal — once it's
+          // locked (or later reverts to churn after TEXTS[0] unlocks, well
+          // past the close-up), it's ordinary noise like every other cell.
+          ch = hero && T < HERO_REVEAL_AT ? pickHeroChurn(seed) : pick(seed);
+        }
         spans.push(
           <span
             key={j}
