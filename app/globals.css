@@ -35,3 +35,27 @@ body {
     display: none;
   }
 }
+
+/* The "play intro again?" nudge (app/[[...address]]/intro-experience.tsx).
+   Base state is its final, fully-visible one — reduced-motion readers
+   (who still get the nudge; only the intro *animation* is gated for them)
+   see it appear instantly, no transition. Motion is opt-in on top of that,
+   never the only path to the visible state. */
+.intro-replay-hint {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .intro-replay-hint {
+    animation: intro-replay-hint-in 500ms ease-out both;
+  }
+}
+@keyframes intro-replay-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

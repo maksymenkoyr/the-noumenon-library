@@ -25,3 +25,17 @@ export function markIntroSeen(): void {
     /* best-effort */
   }
 }
+
+/**
+ * The /about "watch the intro again" link (app/about/replay-intro-link.tsx):
+ * clears the cookie client-side, then a plain `href="/"` does the rest —
+ * `showIntro` in page.tsx is already just "is this cookie absent", so
+ * clearing it here is the whole mechanism, no server-side plumbing needed.
+ */
+export function clearIntroSeen(): void {
+  try {
+    document.cookie = `${INTRO_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+  } catch {
+    /* best-effort */
+  }
+}

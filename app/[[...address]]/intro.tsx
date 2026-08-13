@@ -44,7 +44,20 @@ type Phase = "playing" | "leaving" | "gone";
 // reduced-motion check and the letterbox scale below.
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
-export function Intro() {
+export function Intro({
+  onDone,
+  force = false,
+}: {
+  // Fires once, whenever phase reaches "gone" — via the normal fade-out, a
+  // skip, or the reduced-motion immediate-skip below. All three mean the
+  // same thing to a caller (app/[[...address]]/intro-experience.tsx): the
+  // overlay is gone now.
+  onDone?: () => void;
+  // Bypasses the reduced-motion check below. Set on a deliberate replay (a
+  // reader who just clicked "play intro again") — reduced-motion is about
+  // suppressing autoplay, not blocking a motion the reader just asked for.
+  force?: boolean;
+} = {}) {
   const derived = useMemo(() => deriveScenes(SCENES), []);
   const [time, setTime] = useState(0);
   const [scale, setScale] = useState(1);
@@ -56,6 +69,15 @@ export function Intro() {
   // for rendering (T = warpTime(derived, time)); reading `time` state back
   // in the same closure would be stale, so the loop tracks its own copy.
   const timeRef = useRef(0);
+  // Latest `onDone`, kept outside the completion effect's own dependency
+  // array below — IntroExperience passes an inline arrow, a fresh
+  // reference every one of its own re-renders (including the one *caused*
+  // by that callback firing), so depending on it directly would re-run the
+  // effect right after completion and re-invoke it once more.
+  const onDoneRef = useRef(onDone);
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  }, [onDone]);
 
   const dismiss = useCallback(() => {
     setPhase((p) => (p === "playing" ? "leaving" : p));
@@ -69,12 +91,13 @@ export function Intro() {
 
   // Reduced motion: never start the clock. A layout effect so this lands
   // before the browser's first paint — a plain effect would let one frame
-  // of the full intro through first.
+  // of the full intro through first. Skipped entirely when `force` is set
+  // (see the prop doc above).
   useIsomorphicLayoutEffect(() => {
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    if (!force && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       setPhase("gone");
     }
-  }, []);
+  }, [force]);
 
   // Letterbox: scale-to-fit the 1080x1080 stage inside the viewport. Also
   // a layout effect, so the stage is correctly sized before first paint
@@ -144,6 +167,13 @@ export function Intro() {
     if (phase !== "leaving") return;
     const id = setTimeout(() => setPhase("gone"), FADE_MS);
     return () => clearTimeout(id);
+  }, [phase]);
+
+  // Tell the caller once the overlay is actually gone — phase is a
+  // one-way machine (playing -> leaving -> gone), so this fires exactly
+  // once per mount regardless of which path got it there.
+  useEffect(() => {
+    if (phase === "gone") onDoneRef.current?.();
   }, [phase]);
 
   if (phase === "gone") return null;

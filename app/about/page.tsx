@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { config } from "@/lib/config";
+import { ReplayIntroLink } from "./replay-intro-link";
 
 // Static launch-hardening page (Phase 9): the legal disclaimer, non-commercial
 // notice, license/source, privacy posture, and the abuse/copyright report path
@@ -41,6 +42,9 @@ export default function AboutPage() {
             written or reviewed by a person. Nothing here is a statement of
             fact, and any resemblance to real texts, events, or people is
             coincidental.
+          </p>
+          <p>
+            <ReplayIntroLink />
           </p>
         </section>
 
