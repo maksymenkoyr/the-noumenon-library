@@ -46,5 +46,9 @@ wander-*.md
 *.dump
 docs/
 
+# local design source for the intro animation (app/[[...address]]/intro.tsx
+# is the ported, shipped version) — a design-tool prototype, not app code.
+Library of Babel animation/
+
 # claude code worktrees
 .claude/worktrees/
