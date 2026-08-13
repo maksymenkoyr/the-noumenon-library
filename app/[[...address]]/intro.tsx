@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { deriveScenes, warpTime, type SceneSpec } from "@/lib/composition";
 import { markIntroSeen } from "@/lib/intro";
 import { CompositionProvider, IntroScene } from "./intro-scene";
-import { introMono, introSerif } from "./intro-fonts";
+import { introMono } from "./intro-fonts";
 
 /**
  * The intro shell: owns the single-pass playback clock and the
@@ -154,7 +154,7 @@ export function Intro() {
     <div
       role="region"
       aria-label="Intro animation"
-      className={`intro-overlay ${introMono.variable} ${introSerif.variable}`}
+      className={`intro-overlay ${introMono.variable}`}
       style={{
         position: "fixed",
         inset: 0,

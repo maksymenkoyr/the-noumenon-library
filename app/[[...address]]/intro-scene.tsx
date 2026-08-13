@@ -21,10 +21,12 @@ import { animate, clamp, Easing, interpolate, type SceneName } from "@/lib/compo
 
 const INK = "#0a0c11";
 const PAPER = "#efe9dc";
-// These reference the custom property names passed as `variable` to
-// next/font in intro-fonts.ts — intro.tsx applies both fonts' `.variable`
-// classes to the stage wrapper, which is what actually defines them.
-const SERIF = "var(--font-intro-serif), Georgia, serif";
+// The site's own reading serif (Lora, app/layout.tsx) — its .variable class
+// is on <html>, so it's already in scope here without intro.tsx doing
+// anything; the narration speaks in the same face every page is set in.
+const SERIF = "var(--font-serif), Georgia, serif";
+// This one *is* wired through intro.tsx (intro-fonts.ts's `.variable`
+// applied to the stage wrapper) — it's scoped to this route, not global.
 const MONO = "var(--font-intro-mono), 'Noto Sans Mono', ui-monospace, monospace";
 
 // Last-saved values from Library of Babel.dc.html's TWEAK_DEFAULTS — the
@@ -107,7 +109,17 @@ interface TextSpec {
   heroAt?: number;
 }
 
-/* every text is predefined; characters lock into it one by one */
+/* every text is predefined; characters lock into it one by one.
+ *
+ * Constraint on any edit here: HERO (35) is the one column the camera opens
+ * on and holds through the whole piece, so `str[HERO - pad]` — i.e.
+ * `t[HERO]`, since padded() left-pads by `pad` — must be a real,
+ * non-space character in EVERY text below, or the opening shot locks onto
+ * blank space. `pad` (the padded()/start argument) is chosen for this, not
+ * for centering — it's nudged off dead-centre wherever the true middle
+ * would land on a space. Keep `len` equal to the string's length; frac()
+ * uses it to stagger each character's lock time across the line.
+ */
 const TEXTS: TextSpec[] = [
   {
     t: padded("any symbol, in any order", 23),
@@ -120,17 +132,17 @@ const TEXTS: TextSpec[] = [
     heroAt: 2.1,
   },
   {
-    t: padded("every book that could ever be written is already on a shelf", 5),
-    start: 5,
-    len: 59,
+    t: padded("every page that could ever be written is already here", 8),
+    start: 8,
+    len: 53,
     from: 20.4,
     to: 24.0,
     out: 25.9,
     outTo: 26.5,
   },
   {
-    t: padded("your book is in there. go dig.", 21),
-    start: 21,
+    t: padded("wander in. see what finds you.", 20),
+    start: 20,
     len: 30,
     from: 26.2,
     to: 27.6,
@@ -195,11 +207,18 @@ interface NamedCell {
   at: number;
 }
 
+// Each title names something readable (a page, not a place or an object) —
+// titles sit on pages, and the library never claims to know facts about the
+// visitor, so nothing here promises to retrieve one. Keep every title ≲28
+// chars: at this point z ≈ 0.14, and a title's x position
+// (`clamp(540 + panX + cellX(c) * z, 170, 910)`) hits its clamp at the
+// outermost cells (c: -3 and c: 3), pinning them hard against the stage
+// edges — a longer line there overflows.
 const NAMED: NamedCell[] = [
-  { c: -2, r: -1, title: "your biography", at: 15.3 },
-  { c: 2, r: -2, title: "best pancake recipe", at: 16.2 },
-  { c: -3, r: 1, title: "the day you die", at: 17.1 },
-  { c: 1, r: 2, title: "lost knowledge", at: 18.0 },
+  { c: -2, r: -1, title: "the letter you never sent", at: 15.3 },
+  { c: 2, r: -2, title: "the last dream before waking", at: 16.2 },
+  { c: -3, r: 1, title: "how it ends", at: 17.1 },
+  { c: 1, r: 2, title: "a memory that isn't yours", at: 18.0 },
   { c: 3, r: 0, title: "poems no one has written", at: 18.8 },
 ];
 const TITLE_LIFE = 1.7;
