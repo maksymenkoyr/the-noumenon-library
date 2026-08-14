@@ -26,6 +26,12 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
+:focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
+  border-radius: 1px;
+}
+
 /* Belt-and-suspenders for app/[[...address]]/intro.tsx: the component
    itself checks matchMedia in a layout effect before its first paint, but
    that's a JS-timing guarantee — this CSS rule also covers the brief

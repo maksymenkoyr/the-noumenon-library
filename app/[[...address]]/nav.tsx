@@ -131,7 +131,7 @@ export function Nav({ nextHref }: { nextHref: string }) {
       >
         liked
       </Link>
-      <form onSubmit={go} className="flex min-w-0 flex-1 items-center gap-2">
+      <form onSubmit={go} className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         <button
           type="submit"
           className="shrink-0 hover:text-neutral-900 dark:hover:text-neutral-100"
@@ -140,16 +140,27 @@ export function Nav({ nextHref }: { nextHref: string }) {
         </button>
         <input
           aria-label="Go to address"
+          aria-invalid={error}
+          aria-describedby={error ? "address-error" : undefined}
           placeholder="gallery/wall/shelf/volume/page"
           value={value}
           onChange={(event) => {
             setValue(event.target.value);
             if (error) setError(false);
           }}
-          className={`min-w-0 flex-1 border-b bg-transparent pb-0.5 outline-none placeholder:text-neutral-400 focus:border-neutral-500 ${
+          className={`min-w-0 flex-1 border-b bg-transparent pb-0.5 placeholder:text-neutral-400 focus:border-neutral-500 ${
             error ? "border-red-400" : "border-neutral-300 dark:border-neutral-700"
           }`}
         />
+        {error && (
+          <p
+            id="address-error"
+            role="alert"
+            className="basis-full font-mono text-xs text-red-600 dark:text-red-400"
+          >
+            not an address — try gallery/wall/shelf/volume/page
+          </p>
+        )}
       </form>
     </nav>
   );

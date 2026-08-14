@@ -86,7 +86,10 @@ export function DevBadge({
   return (
     <div className="fixed bottom-3 right-3 z-50 flex max-w-[min(32rem,calc(100vw-1.5rem))] flex-col items-end gap-1">
       {expanded && (
-        <div className="max-h-[60vh] w-full overflow-auto rounded bg-neutral-900/95 p-3 font-mono text-xs text-neutral-300 shadow-sm backdrop-blur-sm dark:bg-neutral-800/95">
+        <div
+          id="dev-badge-panel"
+          className="max-h-[60vh] w-full overflow-auto rounded bg-neutral-900/95 p-3 font-mono text-xs text-neutral-300 shadow-sm backdrop-blur-sm dark:bg-neutral-800/95"
+        >
           <dl className="mb-3 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-neutral-400">
             {levers.map(([label, value]) =>
               value == null ? null : (
@@ -146,6 +149,8 @@ export function DevBadge({
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-controls="dev-badge-panel"
         className="rounded bg-neutral-900/85 px-2 py-1 font-mono text-xs text-neutral-300 shadow-sm backdrop-blur-sm hover:text-neutral-100 dark:bg-neutral-800/85"
       >
         {summary}

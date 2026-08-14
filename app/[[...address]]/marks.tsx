@@ -295,7 +295,6 @@ export function Marks({
         type="button"
         onClick={toggle}
         aria-pressed={liked}
-        aria-label={liked ? "unlike this page" : "like this page"}
         className="inline-flex items-center gap-2 hover:text-neutral-800 dark:hover:text-neutral-200"
       >
         <span
@@ -306,7 +305,13 @@ export function Marks({
         >
           {liked ? "♥" : "♡"}
         </span>
+        {/* No aria-label here: the visible text below IS the accessible
+            name (WCAG 2.5.3 Label in Name) — an aria-label that omits it
+            (e.g. "unlike this page" while the label reads "liked · 3
+            readers") would break voice-control matching. The sr-only
+            suffix disambiguates the gesture without hiding the count. */}
         <span>{label}</span>
+        <span className="sr-only"> — like this page</span>
       </button>
       <button
         type="button"

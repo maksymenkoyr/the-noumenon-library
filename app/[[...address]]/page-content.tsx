@@ -38,6 +38,13 @@ export function PageContent({ children }: { children: React.ReactNode }) {
     <article
       className={`${PAGE_HEIGHT} whitespace-pre-wrap font-serif text-lg leading-loose text-neutral-800 dark:text-neutral-200`}
     >
+      {/* Announces the Suspense fallback -> real-page swap to screen readers.
+          A live region present at initial load isn't announced, only later
+          changes are — so this stays silent on a direct/cached load and
+          speaks only when it replaces CrystallizingPage's own status text. */}
+      <p role="status" className="sr-only">
+        page ready
+      </p>
       {children}
     </article>
   );
@@ -50,7 +57,10 @@ export function PageContent({ children }: { children: React.ReactNode }) {
 export function CrystallizingPage() {
   return (
     <div className={`flex ${PAGE_HEIGHT} items-center justify-center`}>
-      <p className="animate-pulse font-serif text-lg italic text-neutral-400">
+      <p
+        role="status"
+        className="motion-safe:animate-pulse font-serif text-lg italic text-neutral-400"
+      >
         crystallizing…
       </p>
     </div>
@@ -83,7 +93,7 @@ export function PlaceholderPage({
     <div
       className={`flex ${PAGE_HEIGHT} flex-col items-center justify-center gap-4 text-center`}
     >
-      <p className="font-serif text-lg italic text-neutral-400">
+      <p role="status" className="font-serif text-lg italic text-neutral-400">
         {PLACEHOLDER_COPY[variant]}
       </p>
       {variant === "explore" && (

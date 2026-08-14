@@ -15,12 +15,12 @@ export const metadata: Metadata = {
 
 export default function LikedPage() {
   return (
-    <main className="mx-auto flex w-full max-w-2xl grow flex-col gap-8 p-8">
+    <main id="content" className="mx-auto flex w-full max-w-2xl grow flex-col gap-8 p-8">
       <header className="flex items-baseline gap-4 font-mono text-sm text-neutral-500">
         <Link href="/" className="hover:text-neutral-900 dark:hover:text-neutral-100">
           ← the library
         </Link>
-        <span>liked pages</span>
+        <h1 className="m-0 text-sm font-normal">liked pages</h1>
       </header>
 
       <LikedList />
