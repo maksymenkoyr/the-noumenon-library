@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs",
+    "seeds": "node --env-file=.env.local scripts/seeds.mjs",
     "takedown": "node --env-file=.env.local scripts/takedown.mjs",
     "invite": "node --env-file=.env.local scripts/invite.mjs",
     "backup": "node --env-file-if-exists=.env.local scripts/backup.mjs",
@@ -17,6 +18,8 @@
     "deploy:prod": "git push origin main:prod"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "aws4fetch": "^1.0.20",
     "next": "16.2.7",
     "openai": "^6.42.0",
@@ -32,6 +35,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.7",
+    "jsdom": "^29.1.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.8"

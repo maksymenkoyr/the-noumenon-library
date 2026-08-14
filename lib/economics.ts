@@ -39,6 +39,7 @@ async function monthlySpendUsd(): Promise<number> {
   const rows = await query<{ cost_usd: string }>(
     "SELECT cost_usd FROM monthly_spend WHERE month = $1",
     [currentMonth()],
+    "economics.monthlySpendUsd",
   );
   return Number(rows[0]?.cost_usd ?? 0);
 }
@@ -52,6 +53,7 @@ async function recentGenerationCount(
     `SELECT count(*)::int AS count FROM rate_limit_hits
      WHERE ip_hash = $1 AND created_at > now() - make_interval(secs => $2)`,
     [hash, windowSeconds],
+    "economics.recentGenerationCount",
   );
   return Number(rows[0]?.count ?? 0);
 }
@@ -110,11 +112,16 @@ export async function noteGeneration(ctx: AdmissionContext): Promise<void> {
     config.rateLimitWindowSeconds,
     config.rateLimitHourWindowSeconds,
   );
-  await query("INSERT INTO rate_limit_hits (ip_hash) VALUES ($1)", [hash]);
+  await query(
+    "INSERT INTO rate_limit_hits (ip_hash) VALUES ($1)",
+    [hash],
+    "economics.noteGeneration.recordHit",
+  );
   await query(
     `DELETE FROM rate_limit_hits
      WHERE ip_hash = $1 AND created_at < now() - make_interval(secs => $2)`,
     [hash, retentionSeconds],
+    "economics.noteGeneration.prune",
   );
 }
 
@@ -130,5 +137,6 @@ export async function recordSpend(usage: GenerationUsage): Promise<void> {
        tokens = monthly_spend.tokens + EXCLUDED.tokens,
        cost_usd = monthly_spend.cost_usd + EXCLUDED.cost_usd`,
     [currentMonth(), usage.tokens, usage.costUsd],
+    "economics.recordSpend",
   );
 }

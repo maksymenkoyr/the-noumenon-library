@@ -4,13 +4,32 @@
  *
  * Every state below shares the same `PAGE_HEIGHT` so the layout never shifts as
  * the Suspense fallback swaps for the finished page (the streaming guide's CLS
- * note). Text is top-aligned with honest whitespace beneath: a short page reads
- * as a deliberate ending, not as something broken. The quality bar is
- * completeness, not fullness.
+ * note). Text is top-aligned in a container sized to the page it was written
+ * to fill.
+ *
+ * This used to read "a short page reads as a deliberate ending, not as
+ * something broken — the quality bar is completeness, not fullness", and the
+ * prompt was built to match: a per-page word budget from a wide range, and an
+ * instruction to *end*. That produced pages that finished early and wrapped
+ * themselves up, which is a short story, not a page of a book.
+ *
+ * The bar is now fullness, on 95% of pages. A page is cut off by the edge of
+ * the paper (lib/pageCut.ts) rather than finished, so leftover whitespace
+ * usually means a generation that came up short — `inputs.cut === false` marks
+ * exactly those. The old case survives as the `complete` ending, held to 5%:
+ * a real book does have short pages, and a wander of nothing but severed ones
+ * has no rhythm.
  */
 
-// Calibrated to comfortably hold ~PAGE_MAX_WORDS (400) at the reading font;
-// a full page fills the container, a fragment leaves honest white below.
+// Sized to hold config.pageWords at the reading font. The two are calibrated
+// against each other and must move together — PAGE_WORDS is now enforced by an
+// actual cut, so a mismatch shows up immediately as either a scrollbar or a
+// band of dead white on every single page.
+//
+// 44rem over a 608px column of 18px Lora on 36px lines is ~19.5 lines, several
+// of which go to blank lines between paragraphs. The previous comment claimed
+// this "comfortably holds ~400 words"; it does not, and every page in the
+// corpus overflowed it.
 const PAGE_HEIGHT = "min-h-[44rem]";
 
 /** A crystallized page: its text, top-aligned in the container. */
@@ -68,7 +87,11 @@ export function PlaceholderPage({
         {PLACEHOLDER_COPY[variant]}
       </p>
       {variant === "explore" && (
-        // Plain anchor: random must re-resolve server-side on every click.
+        // A full load to `/`, where the server picks the address. Unlike
+        // nav.tsx's `random` this stays a plain anchor: it is the one link in
+        // a server component, and this variant is shown when generation is
+        // capped — the ask is to slow down, so a snappy client-side wander
+        // would be working against the copy.
         // eslint-disable-next-line @next/next/no-html-link-for-pages
         <a
           href="/"

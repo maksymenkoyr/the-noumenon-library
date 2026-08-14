@@ -16,6 +16,7 @@ export async function GET() {
     moderationMs,
     moderationModel,
     prompt,
+    promptSegments,
     promptVariant,
   } = await resolvePage(address, { clientIp: await getClientIp() });
   return NextResponse.json({
@@ -27,6 +28,7 @@ export async function GET() {
     moderationMs,
     moderationModel,
     prompt,
+    promptSegments,
     promptVariant,
   });
 }

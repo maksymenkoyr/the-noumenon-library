@@ -205,6 +205,7 @@ per-page provenance, which is how prompt changes are actually evaluated.
 | Hosting | Vercel (git-connected); GitHub Actions for CI, migrations, backups |
 | Backups | Cloudflare R2 via `aws4fetch` |
 | Alerting | Telegram bot API via `fetch` — no SDK, no error-tracking vendor |
+| Observability | Vercel Speed Insights + Web Analytics (client-side); Telegram for server-side alerts |
 
 All business logic lives in `lib/`; routes and components are thin adapters that
 call the same functions. The server component `await`s `resolvePage()` directly

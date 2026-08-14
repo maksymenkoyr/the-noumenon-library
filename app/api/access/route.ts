@@ -43,6 +43,7 @@ export async function GET(request: NextRequest) {
       WHERE token = $1
       RETURNING token, dev_mode, operator`,
     [token, ip ? ipHash(ip) : null],
+    "access.GET.redeemToken",
   );
   if (rows.length === 0) return denied(); // unknown token
 
@@ -56,6 +57,7 @@ export async function GET(request: NextRequest) {
        ON CONFLICT (token, ip_hash)
        DO UPDATE SET last_seen = now(), uses = invite_redemptions.uses + 1`,
       [token, ipHash(ip)],
+      "access.GET.recordRedemption",
     );
   }
 

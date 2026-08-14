@@ -38,6 +38,7 @@ export async function recordModelCall(
          errors = model_stats.errors + EXCLUDED.errors,
          last_used_at = now()`,
       [model, outcome.ok ? 1 : 0, outcome.ok ? Math.round(outcome.ms) : 0, outcome.ok ? 0 : 1],
+      "modelStats.recordModelCall",
     );
   } catch (err) {
     devLog(
@@ -60,6 +61,7 @@ export async function markRateLimited(model: string, seconds: number): Promise<v
          rate_limited_until = now() + make_interval(secs => $2),
          last_used_at = now()`,
       [model, seconds],
+      "modelStats.markRateLimited",
     );
   } catch (err) {
     devLog(
@@ -81,7 +83,11 @@ export async function getModelStats(): Promise<Map<string, ModelStat>> {
       calls: string;
       total_ms: string;
       rate_limited_until: Date | null;
-    }>(`SELECT model, calls, total_ms, rate_limited_until FROM model_stats`);
+    }>(
+      `SELECT model, calls, total_ms, rate_limited_until FROM model_stats`,
+      [],
+      "modelStats.getModelStats",
+    );
 
     const stats = new Map<string, ModelStat>();
     for (const row of rows) {

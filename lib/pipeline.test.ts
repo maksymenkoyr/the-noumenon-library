@@ -21,9 +21,19 @@ vi.mock("./moderate", () => ({
 // Mock monitoring so we can assert which structured events the pipeline emits
 // without writing JSON to the test output.
 vi.mock("./monitor", () => ({ monitor: vi.fn() }));
+// chooseLevers() is real here, and it asks the gallery for its association
+// terms — a network call. Stub it to "no terms", which is the fail-open path
+// the pipeline already has to handle; the lever itself is covered in
+// lib/gallerySeeds.test.ts.
+vi.mock("./gallerySeeds", async () => {
+  const actual =
+    await vi.importActual<typeof import("./gallerySeeds")>("./gallerySeeds");
+  return { ...actual, termsForGallery: vi.fn(async () => []) };
+});
 
+import { config } from "./config";
 import { closePool, query } from "./db";
-import { generatePage } from "./generate";
+import { chooseLevers, generatePage } from "./generate";
 import { moderate } from "./moderate";
 import { monitor } from "./monitor";
 import { generatePipeline } from "./pipeline";
@@ -46,6 +56,12 @@ const gen = (text: string, model = "mock-model") => ({
   provider: "openrouter" as const,
   usage: { tokens: 100, costUsd: 0 },
   prompt: `prompt for: ${text}`,
+  // The labeled parts the prompt was assembled from (lib/prompts.ts); the real
+  // segmentation is covered in prompts.test.ts.
+  promptSegments: [
+    { id: "framing", text: `prompt for: ${text}`, join: "paragraph" as const },
+  ],
+  maxTokens: 1000,
   durationMs: 500,
 });
 
@@ -93,12 +109,18 @@ describe("generatePipeline", () => {
     expect(result.inputs.model).toBeTruthy();
     expect(result.inputs.provider).toBe("openrouter");
     expect(result.inputs.temperature).toBeGreaterThan(0);
-    // base-v1, plus a `+id` suffix per constraint that happened to fire.
-    expect(result.inputs.promptVariant).toMatch(/^base-v1(\+[a-z-]+)*$/);
+    // base-v3, plus a `+id` suffix per constraint that happened to fire.
+    expect(result.inputs.promptVariant).toMatch(/^base-v3(\+[a-z-]+)*$/);
     expect(result.inputs.constraints).toBeInstanceOf(Array);
     // The exact prompt that produced the committed content (dev-overlay
     // provenance, lib/resolvePage.ts / lib/devMode).
     expect(result.inputs.prompt).toBe("prompt for: a unique page");
+    // ...and the labeled parts it was assembled from, so the overlay can show
+    // the prompt structured rather than as one blob.
+    expect(result.inputs.promptSegments).toEqual([
+      { id: "framing", text: "prompt for: a unique page", join: "paragraph" },
+    ]);
+    expect(result.inputs.maxTokens).toBe(1000);
     // Generation and moderation time are reported separately, not as one total.
     expect(result.inputs.generationMs).toBe(500);
     expect(result.inputs.moderationMs).toBe(50);
@@ -179,6 +201,54 @@ describe("generatePipeline", () => {
 
     await generatePipeline(ADDR);
     expect(generateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("commits the cut page, not the draft it was cut from", async () => {
+    // The model is asked for more than a page precisely so there is material
+    // to cut (lib/pageCut.ts). What reaches the store must be the trimmed page.
+    const draft = Array.from({ length: 900 }, () => "word").join(" ");
+    generateMock.mockResolvedValue(gen(draft));
+
+    const result = await generatePipeline(ADDR);
+    const words = result.content.trim().split(/\s+/).length;
+
+    // Filler has no sentence boundaries, so cut-soft finds none within its
+    // lookback and falls through to a hard cut — every ending lands on the page.
+    expect(words).toBe(config.pageWords);
+    expect(result.inputs.actualWords).toBe(words);
+    expect(result.inputs.cut).toBe(true);
+    expect(result.inputs.ending).toBeTruthy();
+  });
+
+  it("dedups on the cut page, so ordering cannot silently regress", async () => {
+    // The sharpest statement of "cut before hashing": seed an existing page
+    // holding exactly the *cut* text. A pipeline that hashed the uncut draft
+    // would see no collision and never regenerate.
+    const draft = Array.from({ length: 900 }, () => "word").join(" ");
+    const cut = Array.from({ length: config.pageWords }, () => "word").join(" ");
+    await seedExistingPage("other/1/1/1/1", cut);
+    generateMock
+      .mockResolvedValueOnce(gen(draft)) // cuts down to the seeded text → collides
+      .mockResolvedValueOnce(gen("a different page")); // fresh sample
+
+    const result = await generatePipeline(ADDR);
+
+    expect(result.content).toBe("a different page");
+    expect(generateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves a page the model came up short on uncut", async () => {
+    generateMock.mockResolvedValue(gen("a unique page"));
+    const result = await generatePipeline(ADDR);
+    // `cut: false` is the signal that whitespace on screen is a weak
+    // generation rather than a deliberate ending.
+    expect(result.inputs.cut).toBe(false);
+    expect(result.inputs.actualWords).toBe(3);
+  });
+
+  it("draws an ending without ever putting it in the prompt", async () => {
+    const levers = await chooseLevers(ADDR);
+    expect(["cut-hard", "cut-soft", "complete"]).toContain(levers.ending);
   });
 
   it("records the model that actually answered, even if generatePage fell back", async () => {

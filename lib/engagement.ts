@@ -54,6 +54,7 @@ export async function likePage(
        count = GREATEST(page_likes.count + $2, 0)
      RETURNING count`,
     [address, delta],
+    "engagement.likePage",
   );
   return Number(rows[0]?.count ?? 0);
 }
@@ -63,6 +64,7 @@ export async function getLikeCount(address: string): Promise<number> {
   const rows = await query<{ count: string }>(
     "SELECT count FROM page_likes WHERE address = $1",
     [address],
+    "engagement.getLikeCount",
   );
   return Number(rows[0]?.count ?? 0);
 }
@@ -85,6 +87,7 @@ export async function dislikePage(
        count = GREATEST(page_dislikes.count + $2, 0)
      RETURNING count`,
     [address, delta],
+    "engagement.dislikePage",
   );
   return Number(rows[0]?.count ?? 0);
 }
@@ -94,6 +97,7 @@ export async function getDislikeCount(address: string): Promise<number> {
   const rows = await query<{ count: string }>(
     "SELECT count FROM page_dislikes WHERE address = $1",
     [address],
+    "engagement.getDislikeCount",
   );
   return Number(rows[0]?.count ?? 0);
 }
@@ -159,6 +163,7 @@ export async function recordEvents(
      VALUES ${values.join(", ")}
      ON CONFLICT (load_id, seq) DO NOTHING`,
     params,
+    "engagement.recordEvents.insertEvents",
   );
 
   const rows = await query<{
@@ -169,6 +174,7 @@ export async function recordEvents(
     `SELECT event, t_ms, arrived_via FROM page_events
      WHERE load_id = $1 ORDER BY seq ASC`,
     [loadId],
+    "engagement.recordEvents.readEvents",
   );
   if (rows.length === 0) return;
 
@@ -209,6 +215,7 @@ export async function recordEvents(
        dwell_ms = EXCLUDED.dwell_ms,
        arrived_via = EXCLUDED.arrived_via`,
     [address, Math.round(activeMs), arrivedVia, loadId],
+    "engagement.recordEvents.upsertSummary",
   );
 }
 
@@ -228,6 +235,7 @@ export async function admitEngagementWrite(clientIp?: string): Promise<boolean> 
     `SELECT count(*)::int AS count FROM engagement_rate_limit_hits
      WHERE ip_hash = $1 AND created_at > now() - make_interval(secs => $2)`,
     [hash, window],
+    "engagement.admitEngagementWrite.count",
   );
   if (Number(rows[0]?.count ?? 0) >= config.engagementRateLimitPerMinute) {
     return false;
@@ -236,11 +244,13 @@ export async function admitEngagementWrite(clientIp?: string): Promise<boolean> 
   await query(
     "INSERT INTO engagement_rate_limit_hits (ip_hash) VALUES ($1)",
     [hash],
+    "engagement.admitEngagementWrite.recordHit",
   );
   await query(
     `DELETE FROM engagement_rate_limit_hits
      WHERE ip_hash = $1 AND created_at < now() - make_interval(secs => $2)`,
     [hash, window],
+    "engagement.admitEngagementWrite.prune",
   );
   return true;
 }

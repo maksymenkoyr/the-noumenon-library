@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import {
@@ -12,9 +13,12 @@ import { getClientIp } from "@/lib/clientIp";
 import { config } from "@/lib/config";
 import { getDevMode } from "@/lib/devMode";
 import { getLikeCount } from "@/lib/engagement";
+import { INTRO_COOKIE } from "@/lib/intro";
+import type { PromptSegment } from "@/lib/prompts";
 import { devFields, resolvePage, type ResolvedPage } from "@/lib/resolvePage";
 import { getPage } from "@/lib/store";
 import { DevBadge } from "./dev-badge";
+import { IntroExperience } from "./intro-experience";
 import { CrystallizingPage, PageContent, PlaceholderPage } from "./page-content";
 import { Marks } from "./marks";
 import { Nav } from "./nav";
@@ -58,12 +62,28 @@ export default async function Page({
   // holds the grant, so non-dev traffic sees no change.
   const devMode = await getDevMode();
 
+  // First-visit intro (app/[[...address]]/intro-experience.tsx): the
+  // cookie (lib/intro) is written client-side on the intro's own mount,
+  // not on completion, so returning readers — including one who reloads
+  // mid-intro — never render it. connection() above already forces this
+  // route to request time, so reading a per-visitor cookie here doesn't
+  // freeze one reader's state into the route cache for everyone else.
+  // (Cleared client-side by app/about/replay-intro-link.tsx to replay it
+  // on demand — same cookie, same path, no separate mechanism.)
+  const showIntro = !(await cookies()).has(INTRO_COOKIE);
+
   return (
     <main className="mx-auto flex w-full max-w-2xl grow flex-col gap-8 p-8">
       <header className="flex items-baseline gap-4 font-mono text-sm text-neutral-500">
         <span className="shrink-0">{canonical}</span>
         <Nav nextHref={nextHref} />
       </header>
+      {/* Mounted here, not before <main>: Intro itself is position:fixed
+          (covers the viewport regardless of DOM position), but its
+          "play intro again?" nudge (rendered by IntroExperience once the
+          overlay's gone) needs a real in-flow spot — right after the
+          header, before the page content, matching the design mock. */}
+      {showIntro && <IntroExperience />}
       {existing?.status === "ok" ? (
         <CommittedPage
           address={canonical}
@@ -127,8 +147,17 @@ async function PageBody({
         moderationModel={resolved.moderationModel}
         moderationMs={resolved.moderationMs}
         prompt={resolved.prompt}
+        promptSegments={resolved.promptSegments}
         promptVariant={resolved.promptVariant}
         temperature={resolved.temperature}
+        provider={resolved.provider}
+        maxTokens={resolved.maxTokens}
+        seedWord={resolved.seedWord}
+        pageWords={resolved.pageWords}
+        startMode={resolved.startMode}
+        ending={resolved.ending}
+        actualWords={resolved.actualWords}
+        cut={resolved.cut}
       />
     );
   }
@@ -153,8 +182,17 @@ async function CommittedPage({
   moderationModel,
   moderationMs,
   prompt,
+  promptSegments,
   promptVariant,
   temperature,
+  provider,
+  maxTokens,
+  seedWord,
+  pageWords,
+  startMode,
+  ending,
+  actualWords,
+  cut,
 }: {
   address: string;
   text: string;
@@ -166,10 +204,20 @@ async function CommittedPage({
   // Dev provenance (lib/resolvePage.ts ResolvedPage / devFields); populated on
   // both the synchronous committed-revisit path above and the streamed
   // fresh-generation path below, sourced from the stored PageInputs record.
-  // Undefined only for rows committed before pages.inputs existed.
+  // Undefined only for rows committed before pages.inputs existed;
+  // `promptSegments` additionally for rows predating segment tracking.
   prompt?: string;
+  promptSegments?: PromptSegment[];
   promptVariant?: string;
   temperature?: number;
+  provider?: string;
+  maxTokens?: number;
+  seedWord?: string;
+  pageWords?: number;
+  startMode?: string;
+  ending?: string;
+  actualWords?: number;
+  cut?: boolean;
 }) {
   const likeCount = await getLikeCount(address);
   return (
@@ -182,8 +230,17 @@ async function CommittedPage({
           moderationModel={moderationModel}
           moderationMs={moderationMs}
           prompt={prompt}
+          promptSegments={promptSegments}
           promptVariant={promptVariant}
           temperature={temperature}
+          provider={provider}
+          maxTokens={maxTokens}
+          seedWord={seedWord}
+          pageWords={pageWords}
+          startMode={startMode}
+          ending={ending}
+          actualWords={actualWords}
+          cut={cut}
         />
       )}
       <Marks address={address} initialCount={likeCount} />

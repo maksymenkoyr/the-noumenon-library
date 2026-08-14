@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono, Lora } from "next/font/google";
+import { SpeedInsights } from "@vercel/speed-insights/next";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,10 +16,15 @@ const geistMono = Geist_Mono({
 });
 
 // The reading face for the page itself — a book-like serif, distinct from
-// the sans/mono used for the library's chrome.
+// the sans/mono used for the library's chrome. Both styles: the
+// "crystallizing…"/placeholder copy (page-content.tsx) and the intro's
+// narration (app/[[...address]]/intro-scene.tsx) set text in `italic`, which
+// without this next/font renders as a browser-synthesized oblique rather
+// than Lora's actual italic cut.
 const lora = Lora({
   variable: "--font-serif",
   subsets: ["latin"],
+  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
@@ -49,6 +56,8 @@ export default function RootLayout({
             </Link>
           </p>
         </footer>
+        <SpeedInsights />
+        <Analytics />
       </body>
     </html>
   );
