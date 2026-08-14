@@ -63,7 +63,7 @@ export default async function OperatorPage() {
     ]);
 
   return (
-    <main className="mx-auto flex w-full max-w-4xl grow flex-col gap-8 p-8">
+    <main id="content" className="mx-auto flex w-full max-w-4xl grow flex-col gap-8 p-8">
       <header className="flex items-baseline gap-4 font-mono text-sm text-neutral-500">
         <Link href="/" className="hover:text-neutral-900 dark:hover:text-neutral-100">
           ← the library
@@ -120,17 +120,18 @@ function PageSignalsTable({ rows }: { rows: PageSignal[] }) {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-max text-left">
+            <caption className="sr-only">page signals</caption>
             <thead>
               <tr className="text-neutral-400 dark:text-neutral-600">
-                <th className="pr-4 font-normal">address</th>
-                <th className="pr-4 font-normal">model</th>
-                <th className="pr-4 font-normal">variant</th>
-                <th className="pr-4 font-normal">likes</th>
-                <th className="pr-4 font-normal">dislikes</th>
-                <th className="pr-4 font-normal">reports</th>
-                <th className="pr-4 font-normal">visits</th>
-                <th className="pr-4 font-normal">avg dwell</th>
-                <th className="font-normal">median dwell</th>
+                <th scope="col" className="pr-4 font-normal">address</th>
+                <th scope="col" className="pr-4 font-normal">model</th>
+                <th scope="col" className="pr-4 font-normal">variant</th>
+                <th scope="col" className="pr-4 font-normal">likes</th>
+                <th scope="col" className="pr-4 font-normal">dislikes</th>
+                <th scope="col" className="pr-4 font-normal">reports</th>
+                <th scope="col" className="pr-4 font-normal">visits</th>
+                <th scope="col" className="pr-4 font-normal">avg dwell</th>
+                <th scope="col" className="font-normal">median dwell</th>
               </tr>
             </thead>
             <tbody>
@@ -171,15 +172,16 @@ function ModelSignalsTable({ rows }: { rows: ModelSignal[] }) {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-max text-left">
+            <caption className="sr-only">model signals</caption>
             <thead>
               <tr className="text-neutral-400 dark:text-neutral-600">
-                <th className="pr-4 font-normal">model</th>
-                <th className="pr-4 font-normal">pages</th>
-                <th className="pr-4 font-normal">likes</th>
-                <th className="pr-4 font-normal">dislikes</th>
-                <th className="pr-4 font-normal">reports</th>
-                <th className="pr-4 font-normal">visits</th>
-                <th className="font-normal">avg median dwell</th>
+                <th scope="col" className="pr-4 font-normal">model</th>
+                <th scope="col" className="pr-4 font-normal">pages</th>
+                <th scope="col" className="pr-4 font-normal">likes</th>
+                <th scope="col" className="pr-4 font-normal">dislikes</th>
+                <th scope="col" className="pr-4 font-normal">reports</th>
+                <th scope="col" className="pr-4 font-normal">visits</th>
+                <th scope="col" className="font-normal">avg median dwell</th>
               </tr>
             </thead>
             <tbody>
@@ -211,15 +213,16 @@ function VariantSignalsTable({ rows }: { rows: VariantSignal[] }) {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-max text-left">
+            <caption className="sr-only">variant signals</caption>
             <thead>
               <tr className="text-neutral-400 dark:text-neutral-600">
-                <th className="pr-4 font-normal">variant</th>
-                <th className="pr-4 font-normal">pages</th>
-                <th className="pr-4 font-normal">likes</th>
-                <th className="pr-4 font-normal">dislikes</th>
-                <th className="pr-4 font-normal">reports</th>
-                <th className="pr-4 font-normal">visits</th>
-                <th className="font-normal">avg median dwell</th>
+                <th scope="col" className="pr-4 font-normal">variant</th>
+                <th scope="col" className="pr-4 font-normal">pages</th>
+                <th scope="col" className="pr-4 font-normal">likes</th>
+                <th scope="col" className="pr-4 font-normal">dislikes</th>
+                <th scope="col" className="pr-4 font-normal">reports</th>
+                <th scope="col" className="pr-4 font-normal">visits</th>
+                <th scope="col" className="font-normal">avg median dwell</th>
               </tr>
             </thead>
             <tbody>
@@ -251,12 +254,13 @@ function ArrivalSignalsTable({ rows }: { rows: ArrivalSignal[] }) {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-max text-left">
+            <caption className="sr-only">arrival signals</caption>
             <thead>
               <tr className="text-neutral-400 dark:text-neutral-600">
-                <th className="pr-4 font-normal">arrived via</th>
-                <th className="pr-4 font-normal">visits</th>
-                <th className="pr-4 font-normal">avg dwell</th>
-                <th className="font-normal">median dwell</th>
+                <th scope="col" className="pr-4 font-normal">arrived via</th>
+                <th scope="col" className="pr-4 font-normal">visits</th>
+                <th scope="col" className="pr-4 font-normal">avg dwell</th>
+                <th scope="col" className="font-normal">median dwell</th>
               </tr>
             </thead>
             <tbody>

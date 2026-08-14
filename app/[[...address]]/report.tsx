@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 /**
  * The content-report affordance for a committed page (docs/reference/legal.md): a quiet
@@ -62,6 +62,27 @@ export function Report({
   const [reason, setReason] = useState("");
   const [sending, setSending] = useState(false);
   const reported = useReported(address);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const reasonRef = useRef<HTMLInputElement>(null);
+  // Tracks whether `open` just fell from true — distinct from the initial
+  // `false` on mount, which must not steal focus onto the trigger.
+  const wasOpenRef = useRef(false);
+
+  // Move focus into the form when it opens, and back to the `report` button
+  // when it closes without a report having landed (i.e. cancel) — imperative
+  // rather than an `autoFocus` prop (jsx-a11y/no-autofocus) so it only fires
+  // on this deliberate user action, never on initial mount. On a real
+  // success the trigger no longer renders (the `reported` branch takes
+  // over), so the ref is null and the restore is a no-op.
+  useEffect(() => {
+    if (open) {
+      wasOpenRef.current = true;
+      reasonRef.current?.focus();
+    } else if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [open]);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -97,18 +118,18 @@ export function Report({
   return (
     <div className="font-mono text-sm text-neutral-400 dark:text-neutral-600">
       {reported ? (
-        <span>reported — thank you</span>
+        <span role="status">reported — thank you</span>
       ) : open ? (
         <form onSubmit={submit} className="flex min-w-0 items-center gap-2">
           <input
+            ref={reasonRef}
             aria-label="Reason (optional)"
             placeholder="reason (optional)"
-            autoFocus
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             maxLength={500}
             disabled={sending}
-            className="min-w-0 flex-1 border-b border-neutral-300 bg-transparent pb-0.5 outline-none placeholder:text-neutral-400 focus:border-neutral-500 dark:border-neutral-700"
+            className="min-w-0 flex-1 border-b border-neutral-300 bg-transparent pb-0.5 placeholder:text-neutral-400 focus:border-neutral-500 dark:border-neutral-700"
           />
           <button
             type="submit"
@@ -129,6 +150,7 @@ export function Report({
       ) : (
         <span className="flex items-baseline gap-2">
           <button
+            ref={triggerRef}
             type="button"
             onClick={() => setOpen(true)}
             className="hover:text-neutral-800 dark:hover:text-neutral-200"

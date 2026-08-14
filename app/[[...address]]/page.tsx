@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -26,6 +27,20 @@ import { Report } from "./report";
 
 export const runtime = "nodejs";
 export const maxDuration = 60; // Hobby cap; generations run 8–32s
+
+// Every address otherwise shares the root layout's title, so all pages sound
+// identical to a screen reader and are indistinguishable in browser history/
+// tabs. Falls through to that shared title for the bare root and an invalid
+// address (notFound() renders its own metadata) — this only names real pages.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ address?: string[] }>;
+}): Promise<Metadata> {
+  const { address: segments } = await params;
+  const address = segments && normalizeAddress(segments);
+  return address ? { title: `${formatAddress(address)} · The Noumenon Library` } : {};
+}
 
 export default async function Page({
   params,
@@ -73,9 +88,9 @@ export default async function Page({
   const showIntro = !(await cookies()).has(INTRO_COOKIE);
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl grow flex-col gap-8 p-8">
+    <main id="content" className="mx-auto flex w-full max-w-2xl grow flex-col gap-8 p-8">
       <header className="flex items-baseline gap-4 font-mono text-sm text-neutral-500">
-        <span className="shrink-0">{canonical}</span>
+        <h1 className="m-0 shrink-0 font-mono text-sm font-normal">{canonical}</h1>
         <Nav nextHref={nextHref} />
       </header>
       {/* Mounted here, not before <main>: Intro itself is position:fixed

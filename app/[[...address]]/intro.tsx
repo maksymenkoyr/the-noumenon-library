@@ -147,7 +147,16 @@ export function Intro({
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") dismiss();
+      if (e.key === "Escape") {
+        dismiss();
+      } else if (e.key === "Tab") {
+        // The skip button is the only focusable control while the overlay
+        // is up. Without this, Tab/Shift+Tab would reach nav/marks/report
+        // controls hidden behind the opaque overlay (WCAG 2.4.3) — a
+        // one-element focus trap is simplest as "always stay put".
+        e.preventDefault();
+        skipRef.current?.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => {
@@ -182,7 +191,8 @@ export function Intro({
 
   return (
     <div
-      role="region"
+      role="dialog"
+      aria-modal="true"
       aria-label="Intro animation"
       className={`intro-overlay ${introMono.variable}`}
       style={{
@@ -200,6 +210,7 @@ export function Intro({
       }}
     >
       <div
+        aria-hidden="true"
         style={{
           position: "relative",
           width: STAGE_SIZE,
