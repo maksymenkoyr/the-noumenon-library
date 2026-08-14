@@ -2,6 +2,7 @@ import { config } from "./config";
 import { query } from "./db";
 import { ipHash } from "./ipHash";
 import { devLog } from "./log";
+import { monitor } from "./monitor";
 
 /**
  * Economics & safety controls — admission control and the spend counter
@@ -70,8 +71,17 @@ async function recentGenerationCount(
 export async function checkAdmission(
   ctx: AdmissionContext,
 ): Promise<AdmissionResult> {
-  if ((await monthlySpendUsd()) >= config.monthlySpendCapUsd) {
-    devLog("admission: over monthly spend cap → explore-only");
+  const spendUsd = await monthlySpendUsd();
+  if (spendUsd >= config.monthlySpendCapUsd) {
+    // Was devLog-only, a no-op in production (lib/log.ts gates on
+    // config.devMode) — the cap could trip in prod and the operator would
+    // never know beyond every visitor seeing the "explore-only" placeholder.
+    // monitor()'s own 60s per-event throttle (lib/monitor.ts) keeps this from
+    // flooding while the cap stays tripped for the rest of the month.
+    await monitor("spend_cap_reached", {
+      spendUsd,
+      capUsd: config.monthlySpendCapUsd,
+    });
     return { ok: false, reason: "spend_cap" };
   }
 
@@ -83,6 +93,7 @@ export async function checkAdmission(
     );
     if (minuteCount >= config.rateLimitPerMinute) {
       devLog(`admission: rate limit hit (${minuteCount}/min) → rate-limited`);
+      await monitor("rate_limit_tripped", { tier: "minute", count: minuteCount });
       return { ok: false, reason: "rate_limit" };
     }
     const hourCount = await recentGenerationCount(
@@ -91,6 +102,7 @@ export async function checkAdmission(
     );
     if (hourCount >= config.rateLimitPerHour) {
       devLog(`admission: rate limit hit (${hourCount}/hr) → rate-limited`);
+      await monitor("rate_limit_tripped", { tier: "hour", count: hourCount });
       return { ok: false, reason: "rate_limit" };
     }
   }
@@ -130,13 +142,56 @@ export async function noteGeneration(ctx: AdmissionContext): Promise<void> {
  * (tokens and tokens×price). Atomic upsert so concurrent generations accumulate.
  */
 export async function recordSpend(usage: GenerationUsage): Promise<void> {
-  await query(
+  const month = currentMonth();
+  const rows = await query<{ cost_usd: string }>(
     `INSERT INTO monthly_spend (month, tokens, cost_usd)
      VALUES ($1, $2, $3)
      ON CONFLICT (month) DO UPDATE SET
        tokens = monthly_spend.tokens + EXCLUDED.tokens,
-       cost_usd = monthly_spend.cost_usd + EXCLUDED.cost_usd`,
-    [currentMonth(), usage.tokens, usage.costUsd],
+       cost_usd = monthly_spend.cost_usd + EXCLUDED.cost_usd
+     RETURNING cost_usd`,
+    [month, usage.tokens, usage.costUsd],
     "economics.recordSpend",
   );
+  await maybeAlertSpendThreshold(month, Number(rows[0]?.cost_usd ?? 0));
+}
+
+/** Percent-of-cap thresholds worth a heads-up before the cap actually trips. */
+const SPEND_ALERT_THRESHOLDS = [50, 80, 100] as const;
+
+/**
+ * Fire a one-time alert the first time this month's spend crosses each
+ * threshold in SPEND_ALERT_THRESHOLDS. `monthly_spend.alerted_pct` is an
+ * idempotency marker, not a counter (lib/schema.sql): the
+ * `WHERE alerted_pct < $2` claim is the same atomic-claim idiom used for page
+ * reservation (pages.status) and report resolution, so a burst of concurrent
+ * generations crossing 50% together still fires exactly one alert rather than
+ * one per request racing here.
+ */
+async function maybeAlertSpendThreshold(
+  month: string,
+  spendUsd: number,
+): Promise<void> {
+  const pctReached = Math.floor((spendUsd / config.monthlySpendCapUsd) * 100);
+  const threshold = [...SPEND_ALERT_THRESHOLDS]
+    .reverse()
+    .find((t) => pctReached >= t);
+  if (threshold === undefined) return;
+
+  const claimed = await query(
+    `UPDATE monthly_spend SET alerted_pct = $2
+     WHERE month = $1 AND alerted_pct < $2
+     RETURNING alerted_pct`,
+    [month, threshold],
+    "economics.maybeAlertSpendThreshold",
+  );
+  // Empty result means another concurrent call already claimed this
+  // threshold (or a higher one) first — nothing more to do.
+  if (claimed.length === 0) return;
+
+  await monitor("spend_threshold_reached", {
+    pct: threshold,
+    spendUsd,
+    capUsd: config.monthlySpendCapUsd,
+  });
 }

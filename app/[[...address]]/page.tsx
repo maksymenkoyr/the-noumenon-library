@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -26,6 +27,33 @@ import { Report } from "./report";
 
 export const runtime = "nodejs";
 export const maxDuration = 60; // Hobby cap; generations run 8–32s
+
+/**
+ * A shared address titles itself (§1.2, social preview) instead of every
+ * unfurl showing the site's generic title. Deliberately reads only the
+ * address string — never resolvePage/getPage — an unfurl bot (Slackbot,
+ * Twitterbot, ...) must not itself trigger a paid generation. The bare root
+ * and any invalid address fall through to the root layout's default title;
+ * the page component's own redirect()/notFound() handle those cases.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ address?: string[] }>;
+}): Promise<Metadata> {
+  const { address: segments } = await params;
+  if (!segments) return {};
+
+  const address = normalizeAddress(segments);
+  if (!address) return {};
+
+  const title = `${formatAddress(address)} · The Noumenon Library`;
+  return {
+    title,
+    openGraph: { title },
+    twitter: { title },
+  };
+}
 
 export default async function Page({
   params,

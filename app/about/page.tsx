@@ -49,6 +49,17 @@ export default function AboutPage() {
         </section>
 
         <section className="flex flex-col gap-3">
+          <h2 className="text-base font-medium">Beta</h2>
+          <p>
+            This deployment is a public beta. The library is still settling —
+            substantial changes are expected, and the library may be reset
+            (all pages wiped) without notice. Once out of beta, a page is
+            meant to be stored for good; until then, please treat anything you
+            find here as impermanent.
+          </p>
+        </section>
+
+        <section className="flex flex-col gap-3">
           <h2 className="text-base font-medium">Non-commercial</h2>
           <p>
             This is a non-commercial art project. There are no ads, no accounts,

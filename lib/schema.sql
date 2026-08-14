@@ -93,6 +93,14 @@ CREATE TABLE IF NOT EXISTS monthly_spend (
   cost_usd NUMERIC NOT NULL DEFAULT 0
 );
 
+-- Highest spend-cap percentage threshold (50/80/100) already alerted on for
+-- this month (lib/economics.ts maybeAlertSpendThreshold) — an idempotency
+-- marker, not a counter, so a burst of concurrent generations crossing 50%
+-- together fires exactly one alert rather than one per request. The
+-- `UPDATE ... WHERE alerted_pct < $2` claim is the same atomic-claim idiom as
+-- the page reservation (pages.status) and report resolution. Additive/idempotent.
+ALTER TABLE monthly_spend ADD COLUMN IF NOT EXISTS alerted_pct SMALLINT NOT NULL DEFAULT 0;
+
 -- Private-access invite tokens (reusable links). Each row is a unique,
 -- unguessable token issued to one person (scripts/invite.mjs). Redeeming it
 -- (app/api/access) drops a signed session cookie in that browser and stamps
@@ -232,6 +240,26 @@ CREATE TABLE IF NOT EXISTS engagement_rate_limit_hits (
 );
 CREATE INDEX IF NOT EXISTS engagement_rate_limit_hits_ip_time_idx
   ON engagement_rate_limit_hits (ip_hash, created_at);
+
+-- Durable record of monitor() events (lib/monitor.ts), added for public
+-- launch: Vercel Hobby keeps only 1 hour of runtime logs, and the Telegram
+-- chat has no history view, so a written report ("it broke yesterday") had
+-- nowhere to be checked against. This table is the queryable back-stop
+-- behind the stderr line and the Telegram push, not a replacement for
+-- either — writes are fire-and-forget from monitor() and must never throw.
+-- `db_query_failed` is deliberately never written here (lib/monitor.ts) —
+-- doing so would mean a DB outage recursing back into the DB. Pruned to the
+-- last 30 days opportunistically, same pattern as rate_limit_hits.
+CREATE TABLE IF NOT EXISTS monitor_events (
+  id         BIGSERIAL PRIMARY KEY,
+  event      TEXT NOT NULL,
+  fields     JSONB NOT NULL DEFAULT '{}'::jsonb,
+  deployment TEXT,                    -- VERCEL_DEPLOYMENT_ID, NULL locally
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS monitor_events_event_time_idx
+  ON monitor_events (event, created_at);
+CREATE INDEX IF NOT EXISTS monitor_events_time_idx ON monitor_events (created_at);
 
 -- Operator grant: an invite flagged here redeems into a session that can see
 -- /operator (lib/operatorMode.ts) — same claim mechanism as dev_mode above,

@@ -4,12 +4,20 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import {
   getArrivalSignals,
+  getModelHealth,
   getModelSignals,
   getPageSignals,
+  getRecentMonitorEvents,
+  getSpendStatus,
+  getTrafficSummary,
   getVariantSignals,
   type ArrivalSignal,
+  type ModelHealth,
   type ModelSignal,
+  type MonitorEventRow,
   type PageSignal,
+  type SpendStatus,
+  type TrafficSummary,
   type VariantSignal,
 } from "@/lib/insights";
 import { getOperatorMode } from "@/lib/operatorMode";
@@ -53,14 +61,27 @@ export default async function OperatorPage() {
   await connection();
   if (!(await getOperatorMode())) notFound();
 
-  const [reports, pageSignals, modelSignals, variantSignals, arrivalSignals] =
-    await Promise.all([
-      listOpenReports(),
-      getPageSignals(100),
-      getModelSignals(),
-      getVariantSignals(),
-      getArrivalSignals(),
-    ]);
+  const [
+    reports,
+    pageSignals,
+    modelSignals,
+    variantSignals,
+    arrivalSignals,
+    monitorEvents,
+    spendStatus,
+    modelHealth,
+    trafficSummary,
+  ] = await Promise.all([
+    listOpenReports(),
+    getPageSignals(100),
+    getModelSignals(),
+    getVariantSignals(),
+    getArrivalSignals(),
+    getRecentMonitorEvents(50),
+    getSpendStatus(),
+    getModelHealth(),
+    getTrafficSummary(),
+  ]);
 
   return (
     <main className="mx-auto flex w-full max-w-4xl grow flex-col gap-8 p-8">
@@ -71,12 +92,125 @@ export default async function OperatorPage() {
         <span>operator</span>
       </header>
 
+      <OpsSummary spend={spendStatus} traffic={trafficSummary} />
+      <ModelHealthTable rows={modelHealth} />
+      <MonitorEventsTable rows={monitorEvents} />
+
       <ReportsQueue reports={reports} />
       <PageSignalsTable rows={pageSignals} />
       <ModelSignalsTable rows={modelSignals} />
       <VariantSignalsTable rows={variantSignals} />
       <ArrivalSignalsTable rows={arrivalSignals} />
     </main>
+  );
+}
+
+// --- Ops: "one page you refresh when someone says it's broken" (§2.5). Kept
+// above the content/research rollups below — system health is what you check
+// first during an incident.
+
+function OpsSummary({
+  spend,
+  traffic,
+}: {
+  spend: SpendStatus;
+  traffic: TrafficSummary;
+}) {
+  return (
+    <section className="flex flex-col gap-3 font-mono text-sm text-neutral-500">
+      <h1 className="text-neutral-800 dark:text-neutral-200">ops</h1>
+      <dl className="grid grid-cols-2 gap-x-8 gap-y-1 sm:grid-cols-4">
+        <div>
+          <dt className="text-neutral-400 dark:text-neutral-600">spend ({spend.month})</dt>
+          <dd className={spend.pct >= 100 ? "text-red-600 dark:text-red-400" : undefined}>
+            ${spend.spendUsd.toFixed(2)} / ${spend.capUsd.toFixed(2)} ({spend.pct.toFixed(0)}%)
+          </dd>
+        </div>
+        <div>
+          <dt className="text-neutral-400 dark:text-neutral-600">pages, 24h</dt>
+          <dd>{traffic.pagesCreated24h}</dd>
+        </div>
+        <div>
+          <dt className="text-neutral-400 dark:text-neutral-600">reader events, 24h</dt>
+          <dd>{traffic.pageEvents24h}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+function ModelHealthTable({ rows }: { rows: ModelHealth[] }) {
+  return (
+    <section className="flex flex-col gap-3 font-mono text-sm text-neutral-500">
+      <h2 className="text-neutral-800 dark:text-neutral-200">model health</h2>
+      {rows.length === 0 ? (
+        <p>no registered models.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-max text-left">
+            <thead>
+              <tr className="text-neutral-400 dark:text-neutral-600">
+                <th className="pr-4 font-normal">slug</th>
+                <th className="pr-4 font-normal">task</th>
+                <th className="pr-4 font-normal">enabled</th>
+                <th className="pr-4 font-normal">health</th>
+                <th className="pr-4 font-normal">calls</th>
+                <th className="pr-4 font-normal">errors</th>
+                <th className="pr-4 font-normal">avg ms</th>
+                <th className="font-normal">last used</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((m) => (
+                <tr key={`${m.slug}:${m.task}`}>
+                  <td className="pr-4">{m.slug}</td>
+                  <td className="pr-4">{m.task}</td>
+                  <td className="pr-4">{m.enabled ? "yes" : "no"}</td>
+                  <td
+                    className={
+                      m.health !== "ok" ? "text-red-600 dark:text-red-400" : undefined
+                    }
+                  >
+                    {m.health}
+                  </td>
+                  <td className="pr-4">{m.calls}</td>
+                  <td className="pr-4">{m.errors}</td>
+                  <td className="pr-4">{m.avgMs === null ? "—" : Math.round(m.avgMs)}</td>
+                  <td>{m.lastUsedAt ? age(m.lastUsedAt) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MonitorEventsTable({ rows }: { rows: MonitorEventRow[] }) {
+  return (
+    <section className="flex flex-col gap-3 font-mono text-sm text-neutral-500">
+      <h2 className="text-neutral-800 dark:text-neutral-200">
+        recent events ({rows.length})
+      </h2>
+      {rows.length === 0 ? (
+        <p>no monitor events recorded.</p>
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {rows.map((e) => (
+            <li key={e.id} className="flex items-baseline gap-4">
+              <span className="shrink-0">{age(e.createdAt)}</span>
+              <span className="shrink-0 text-neutral-800 dark:text-neutral-200">
+                {e.event}
+              </span>
+              <span className="min-w-0 flex-1 truncate">
+                {JSON.stringify(e.fields)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

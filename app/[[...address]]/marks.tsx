@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { LIKE_EVENT, likedKey, migrateLegacyLikes } from "@/lib/liked";
+import { reportClientError } from "@/lib/reportClientError";
 
 migrateLegacyLikes();
 
@@ -133,8 +134,16 @@ export function Marks({
       .then((data) => {
         if (typeof data?.count === "number") setCount(data.count); // reconcile
       })
-      .catch(() => {
-        /* leave the optimistic count; the local mark still persists */
+      .catch((err) => {
+        // The write may not have landed server-side — leaving the optimistic
+        // count in place would show a like that never actually registered in
+        // the aggregate. Revert it; the local mark (writeMark, above) stays,
+        // since that's the reader's own gesture, not the server sync.
+        setCount((c) => Math.max(c + (next ? -1 : 1), 0));
+        reportClientError(
+          err instanceof Error ? err : new Error("like request failed"),
+          `/api/like?address=${address}`,
+        );
       });
   }, [liked, address]);
 

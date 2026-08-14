@@ -4,9 +4,15 @@ An endless, shared library of pages that do not exist until someone walks into
 them. Addresses are Borges-style coordinates —
 `/{gallery}/{wall}/{shelf}/{volume}/{page}` (e.g. `/io-9/3/2/17/308`). The
 first visitor to an address triggers a language model to crystallize a page
-there; it is then stored forever, identical for every visitor after. There is
-no search — you can only wander: jump to a random address, step to the next
-one, or type a coordinate.
+there; it is then stored — identical for every visitor after — for as long as
+the deployment holding it exists. There is no search — you can only wander:
+jump to a random address, step to the next one, or type a coordinate.
+
+**Public beta.** The hosted deploy at the link above is a beta: substantial
+changes are still expected, and the library may be reset (all pages wiped)
+without notice. Once out of beta, "stored forever" is the actual design intent
+(see [Concept](#concept)); until then, the honest promise is only what's
+described here.
 
 Every page is **machine-generated fiction**. Nothing here is a statement of
 fact, and any resemblance to real texts, events, or people is coincidental.
