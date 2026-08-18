@@ -39,7 +39,7 @@ afterAll(async () => {
 describe("checkAdmission rate-limit tiers", () => {
   it("admits under both ceilings", async () => {
     for (let i = 0; i < 2; i++) {
-      expect(await checkAdmission({ clientIp: IP })).toEqual({ ok: true });
+      expect((await checkAdmission({ clientIp: IP })).ok).toBe(true);
       await noteGeneration({ clientIp: IP });
     }
   });
@@ -67,6 +67,34 @@ describe("checkAdmission rate-limit tiers", () => {
     );
     const result = await checkAdmission({ clientIp: IP });
     expect(result).toEqual({ ok: false, reason: "rate_limit" });
+  });
+});
+
+/**
+ * Regression coverage for the spend-cap TOCTOU fix: checkAdmission used to
+ * read monthlySpendUsd() once and let a generation (8-32s) run before
+ * recordSpend wrote the real cost back, so concurrent claims to *different*
+ * addresses in that window all read the same under-cap total and were all
+ * admitted — overshoot bounded only by concurrency × per-page cost, not the
+ * cap. checkAdmission now claims its estimate atomically (reserveSpend), so
+ * concurrent claims serialize on the one monthly_spend row instead.
+ */
+describe("checkAdmission spend-cap concurrency", () => {
+  it("never lets concurrent claims push cost_usd past the cap", async () => {
+    // No clientIp on any call, so the per-IP rate limit (a separate control)
+    // can't be what's bounding this — only the spend-cap reservation can.
+    const results = await Promise.all(
+      Array.from({ length: 30 }, () => checkAdmission({})),
+    );
+    const admitted = results.filter((r) => r.ok);
+    // The $1 cap (hoisted above) must bind before all 30 land.
+    expect(admitted.length).toBeGreaterThan(0);
+    expect(admitted.length).toBeLessThan(30);
+
+    const rows = await query<{ cost_usd: string }>(
+      "SELECT cost_usd FROM monthly_spend WHERE month = to_char(now(), 'YYYY-MM')",
+    );
+    expect(Number(rows[0]?.cost_usd)).toBeLessThanOrEqual(1);
   });
 });
 

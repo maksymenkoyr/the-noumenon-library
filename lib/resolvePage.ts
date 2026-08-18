@@ -1,7 +1,8 @@
 import {
   checkAdmission,
   noteGeneration,
-  recordSpend,
+  reconcileSpend,
+  refundSpend,
   type AdmissionContext,
 } from "./economics";
 import { monitor } from "./monitor";
@@ -202,21 +203,25 @@ async function generateAndCommit(
       // The reservation is gone or no longer 'generating' — a takedown landed
       // mid-generation (which must win, docs/reference/legal.md), or the row was
       // released/reclaimed by another request. The LLM spend still happened,
-      // so record it, then serve whatever the store holds now rather than
-      // presenting the orphaned content as committed.
-      await recordSpend(usage);
+      // so true up the reservation to it, then serve whatever the store holds
+      // now rather than presenting the orphaned content as committed.
+      await reconcileSpend(admission.reservedUsd, usage);
       await monitor("commit_lost", { address });
       const row = await getPage(address);
       if (row && row.status !== "generating") return resolved(row);
       return { status: "explore", text: EXPLORE_ONLY_PLACEHOLDER };
     }
-    await recordSpend(usage);
+    await reconcileSpend(admission.reservedUsd, usage);
     return { status: "ok", text: content, ...devFields(inputs) };
   } catch (error) {
     // Unwedge the address so the next visitor becomes the first visitor. Covers
     // provider errors, an undetermined moderation result (lib/moderate throws),
     // and content that failed moderation twice (lib/pipeline throws) — all are
-    // retried on a later visit rather than permanently blocked.
+    // retried on a later visit rather than permanently blocked. The reserved
+    // estimate is refunded in full — usage isn't available here (lib/pipeline.ts
+    // doesn't surface it on throw), so this is the same known blind spot
+    // refundSpend documents, not a new one.
+    await refundSpend(admission.reservedUsd);
     await releaseReservation(address);
     // Emit an observability event (§9 error logging/alerting) before rethrowing.
     await monitor("generation_failed", {
