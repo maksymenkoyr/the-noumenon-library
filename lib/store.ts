@@ -68,6 +68,10 @@ export interface PageInputs {
   // model returned less than a page and there was nothing to trim.
   actualWords?: number;
   cut?: boolean;
+  // How the page was damaged after cutting (lib/pageDamage.ts Damage), or
+  // "none" on the overwhelming majority of pages. Kept off promptVariant for
+  // the same reason as startMode/ending — query it as `inputs->>'damage'`.
+  damage?: string;
   // The exact prompt sent for whichever attempt ended up committed, plus the
   // labeled parts it was assembled from (lib/prompts.ts) — the dev overlay
   // renders the parts and falls back to the flat string for rows committed

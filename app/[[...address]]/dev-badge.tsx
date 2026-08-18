@@ -37,6 +37,7 @@ export function DevBadge({
   cut,
   startMode,
   ending,
+  damage,
 }: {
   model?: string | null;
   generationMs?: number;
@@ -54,6 +55,7 @@ export function DevBadge({
   cut?: boolean;
   startMode?: string;
   ending?: string;
+  damage?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   if (!model && generationMs == null && moderationMs == null) return null;
@@ -120,6 +122,14 @@ export function DevBadge({
                 <dd>
                   {startMode ?? "?"} → {ending ?? "?"}
                 </dd>
+              </>
+            )}
+            {/* Hidden on the overwhelming "none" case, same as the other
+                conditionally-shown rows — a rare texture, not a default. */}
+            {damage && damage !== "none" && (
+              <>
+                <dt>damage</dt>
+                <dd>{damage}</dd>
               </>
             )}
           </dl>

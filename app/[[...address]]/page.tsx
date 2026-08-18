@@ -158,6 +158,7 @@ async function PageBody({
         ending={resolved.ending}
         actualWords={resolved.actualWords}
         cut={resolved.cut}
+        damage={resolved.damage}
       />
     );
   }
@@ -193,6 +194,7 @@ async function CommittedPage({
   ending,
   actualWords,
   cut,
+  damage,
 }: {
   address: string;
   text: string;
@@ -218,6 +220,7 @@ async function CommittedPage({
   ending?: string;
   actualWords?: number;
   cut?: boolean;
+  damage?: string;
 }) {
   const likeCount = await getLikeCount(address);
   return (
@@ -241,6 +244,7 @@ async function CommittedPage({
           ending={ending}
           actualWords={actualWords}
           cut={cut}
+          damage={damage}
         />
       )}
       <Marks address={address} initialCount={likeCount} />

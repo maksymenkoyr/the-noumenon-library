@@ -18,6 +18,7 @@ import {
 } from "./providers";
 import { pickTerm, termsForGallery } from "./gallerySeeds";
 import { pickEnding, type Ending } from "./pageCut";
+import { pickDamage, type Damage } from "./pageDamage";
 import {
   buildPromptSegments,
   DEFAULT_PROMPT_VARIANT,
@@ -64,6 +65,10 @@ export interface GenerationLevers {
   // Target length for the `complete` ending only, drawn well under a page so
   // the model's own overshoot still lands inside it. Undefined otherwise.
   completeWords?: number;
+  // How the page is damaged after cutting (lib/pageDamage.ts). Deliberately
+  // NOT in the prompt, same reasoning as `ending`: a model asked to write
+  // damage performs damage. Applied to the returned text in lib/pipeline.ts.
+  damage: Damage;
   promptVariant: string;
   // Dynamic constraints sampled for this page. Their ids ride into
   // provenance via provenanceVariant().
@@ -148,6 +153,9 @@ export async function chooseLevers(
     ending.id === "complete"
       ? Math.round(config.pageWords * (0.2 + rng() * 0.35))
       : undefined;
+  // Last draw on the main stream, per the rule above — appended rather than
+  // inserted, so it can't reshuffle any lever drawn before it.
+  const damage = pickDamage(rng);
   // Drawn from a separate, volume-scoped stream (lib/seededRandom.ts
   // volumeSeed) rather than the page stream above: the subject must hold
   // across all 410 pages of a volume, and must survive a retry's redraw.
@@ -158,6 +166,7 @@ export async function chooseLevers(
       `provider=${chosen.provider} temp=${temperature.toFixed(2)} ` +
       `pageWords=${config.pageWords} start=${start.id} ending=${ending.id} ` +
       (completeWords ? `completeWords=${completeWords} ` : "") +
+      `damage=${damage.id} ` +
       `variant=${promptVariant}` +
       (seedTerm ? ` seed=${seedTerm}` : "") +
       (constraints.length
@@ -174,6 +183,7 @@ export async function chooseLevers(
     startPhrase: start.phrase,
     ending: ending.id,
     completeWords,
+    damage: damage.id,
     promptVariant,
     constraints,
     seedTerm,
