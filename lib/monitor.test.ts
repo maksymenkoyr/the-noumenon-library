@@ -1,6 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
-import { monitor } from "./monitor";
+vi.hoisted(() => {
+  // Same pattern as the other DB-backed suites (e.g. lib/economics.test.ts):
+  // set this before any module under test reads config.databaseUrl.
+  process.env.DATABASE_URL =
+    process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/noumenon_test";
+});
+
+import { closeMonitorPool, monitor } from "./monitor";
+import { closePool, query } from "./db";
 
 /**
  * The throttle Map is module-level and persists across tests in this file, so
@@ -9,6 +27,19 @@ import { monitor } from "./monitor";
  * it away.
  */
 describe("monitor", () => {
+  beforeAll(async () => {
+    await query(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
+  });
+
+  beforeEach(async () => {
+    await query("TRUNCATE monitor_events");
+  });
+
+  afterAll(async () => {
+    await closePool();
+    await closeMonitorPool();
+  });
+
   const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
 
   beforeEach(() => {
@@ -131,5 +162,25 @@ describe("monitor", () => {
     enableTelegram();
     fetchMock.mockRejectedValueOnce(new Error("telegram down"));
     await expect(monitor("telegram_down")).resolves.toBeUndefined();
+  });
+
+  it("writes the event to monitor_events, the durable record behind Telegram/stderr", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
+    vi.stubEnv("TELEGRAM_CHAT_ID", "");
+    await monitor("durable_write", { address: "io-9/3" });
+
+    const rows = await query<{ event: string; fields: { address: string } }>(
+      "SELECT event, fields FROM monitor_events WHERE event = $1",
+      ["durable_write"],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].fields.address).toBe("io-9/3");
+  });
+
+  it("never writes db_query_failed to monitor_events — writing it during a DB outage would recurse", async () => {
+    await monitor("db_query_failed", { op: "test.op", error: "connection refused" });
+
+    const rows = await query("SELECT 1 FROM monitor_events WHERE event = 'db_query_failed'");
+    expect(rows).toHaveLength(0);
   });
 });

@@ -10,10 +10,14 @@ vi.hoisted(() => {
   process.env.RATE_LIMIT_WINDOW_SECONDS = "60";
   process.env.RATE_LIMIT_PER_HOUR = "5";
   process.env.RATE_LIMIT_HOUR_WINDOW_SECONDS = "3600";
+  // $1 cap makes the 50/80/100% thresholds (below) land on clean dollar
+  // amounts: $0.50, $0.80, $1.00.
+  process.env.MONTHLY_SPEND_CAP_USD = "1";
 });
 
-import { checkAdmission, noteGeneration } from "./economics";
+import { checkAdmission, noteGeneration, recordSpend } from "./economics";
 import { closePool, query } from "./db";
+import { closeMonitorPool } from "./monitor";
 import { ipHash } from "./ipHash";
 
 const IP = "203.0.113.42";
@@ -24,17 +28,18 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await query("TRUNCATE rate_limit_hits, monthly_spend CASCADE");
+  await query("TRUNCATE rate_limit_hits, monthly_spend, monitor_events CASCADE");
 });
 
 afterAll(async () => {
   await closePool();
+  await closeMonitorPool();
 });
 
 describe("checkAdmission rate-limit tiers", () => {
   it("admits under both ceilings", async () => {
     for (let i = 0; i < 2; i++) {
-      expect(await checkAdmission({ clientIp: IP })).toEqual({ ok: true });
+      expect((await checkAdmission({ clientIp: IP })).ok).toBe(true);
       await noteGeneration({ clientIp: IP });
     }
   });
@@ -62,6 +67,34 @@ describe("checkAdmission rate-limit tiers", () => {
     );
     const result = await checkAdmission({ clientIp: IP });
     expect(result).toEqual({ ok: false, reason: "rate_limit" });
+  });
+});
+
+/**
+ * Regression coverage for the spend-cap TOCTOU fix: checkAdmission used to
+ * read monthlySpendUsd() once and let a generation (8-32s) run before
+ * recordSpend wrote the real cost back, so concurrent claims to *different*
+ * addresses in that window all read the same under-cap total and were all
+ * admitted — overshoot bounded only by concurrency × per-page cost, not the
+ * cap. checkAdmission now claims its estimate atomically (reserveSpend), so
+ * concurrent claims serialize on the one monthly_spend row instead.
+ */
+describe("checkAdmission spend-cap concurrency", () => {
+  it("never lets concurrent claims push cost_usd past the cap", async () => {
+    // No clientIp on any call, so the per-IP rate limit (a separate control)
+    // can't be what's bounding this — only the spend-cap reservation can.
+    const results = await Promise.all(
+      Array.from({ length: 30 }, () => checkAdmission({})),
+    );
+    const admitted = results.filter((r) => r.ok);
+    // The $1 cap (hoisted above) must bind before all 30 land.
+    expect(admitted.length).toBeGreaterThan(0);
+    expect(admitted.length).toBeLessThan(30);
+
+    const rows = await query<{ cost_usd: string }>(
+      "SELECT cost_usd FROM monthly_spend WHERE month = to_char(now(), 'YYYY-MM')",
+    );
+    expect(Number(rows[0]?.cost_usd)).toBeLessThanOrEqual(1);
   });
 });
 
@@ -97,5 +130,61 @@ describe("noteGeneration retention", () => {
     );
     // Only the fresh hit from noteGeneration survives; the 2h-old one is pruned.
     expect(rows[0].count).toBe(1);
+  });
+});
+
+/**
+ * Regression coverage for the launch-blocker fix (§1.4, docs/…): the spend
+ * cap and rate-limit trips used to only call devLog, a no-op in production
+ * (lib/log.ts gates on config.devMode) — so an operator would never learn the
+ * cap had tripped beyond every visitor seeing the explore-only placeholder.
+ * These assert the durable side effect (a monitor_events row), not the
+ * Telegram push, which lib/monitor.test.ts already covers in isolation.
+ */
+describe("monitor integration", () => {
+  async function monitorEventCount(event: string): Promise<number> {
+    const rows = await query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM monitor_events WHERE event = $1",
+      [event],
+    );
+    return rows[0].count;
+  }
+
+  it("reports spend_cap_reached once the monthly cap is hit", async () => {
+    await query(
+      "INSERT INTO monthly_spend (month, tokens, cost_usd) VALUES (to_char(now(), 'YYYY-MM'), 1000, 1)",
+    );
+    expect(await checkAdmission({ clientIp: IP })).toEqual({
+      ok: false,
+      reason: "spend_cap",
+    });
+    expect(await monitorEventCount("spend_cap_reached")).toBe(1);
+  });
+
+  it("reports rate_limit_tripped when a tier trips", async () => {
+    for (let i = 0; i < 3; i++) {
+      await checkAdmission({ clientIp: IP });
+      await noteGeneration({ clientIp: IP });
+    }
+    await checkAdmission({ clientIp: IP }); // 4th: trips the per-minute tier
+    expect(await monitorEventCount("rate_limit_tripped")).toBe(1);
+  });
+
+  it("fires spend_threshold_reached exactly once per threshold as spend crosses 50/80/100%", async () => {
+    await recordSpend({ tokens: 100, costUsd: 0.5 }); // → $0.50 = 50%
+    await recordSpend({ tokens: 100, costUsd: 0.31 }); // → $0.81 = 81%
+    await recordSpend({ tokens: 100, costUsd: 0.2 }); // → $1.01 = 101%, over cap
+    // A further generation past the cap must not re-fire the 100% alert.
+    await recordSpend({ tokens: 100, costUsd: 0.05 });
+
+    const rows = await query<{ fields: { pct: number } }>(
+      "SELECT fields FROM monitor_events WHERE event = 'spend_threshold_reached' ORDER BY id",
+    );
+    expect(rows.map((r) => r.fields.pct)).toEqual([50, 80, 100]);
+  });
+
+  it("does not alert below the first threshold", async () => {
+    await recordSpend({ tokens: 100, costUsd: 0.49 }); // → $0.49 = 49%, just under 50%
+    expect(await monitorEventCount("spend_threshold_reached")).toBe(0);
   });
 });

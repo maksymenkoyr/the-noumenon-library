@@ -1,3 +1,4 @@
+import { Pool } from "pg";
 import { config } from "./config";
 
 /**
@@ -9,8 +10,10 @@ import { config } from "./config";
  *
  * On top of the log line, if `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are
  * both set the event is also pushed to Telegram (docs/reference/architecture.md
- * §9, Phase 7). Vercel Hobby keeps no log history, so the Telegram chat — not
- * the platform — is the durable record of what went wrong. Events fired today:
+ * §9, Phase 7), and — except for `db_query_failed` — the event is written to
+ * the `monitor_events` table (lib/schema.sql) so it outlives both Vercel
+ * Hobby's 1-hour log retention and Telegram's lack of a history/search view.
+ * Events fired today:
  *   - `db_query_failed` (lib/db.ts) — a Postgres query threw. The
  *     charter-critical signal: the precious store may be unreachable (§9).
  *     Carries `op`, the `"<module>.<function>"` label of the calling site.
@@ -31,6 +34,16 @@ import { config } from "./config";
  *   - `page_reported` (app/api/report/route.ts) — a reader filed a report.
  *   - `report_email_failed` (lib/reportEmail.ts) — the report notification
  *     couldn't be delivered.
+ *   - `spend_cap_reached` (lib/economics.ts) — the monthly spend cap has been
+ *     hit; generation is capped to explore-only for the rest of the month.
+ *   - `spend_threshold_reached` (lib/economics.ts) — this month's spend
+ *     crossed 50/80/100% of the cap for the first time (monthly_spend.alerted_pct).
+ *   - `rate_limit_tripped` (lib/economics.ts) — a visitor's per-minute or
+ *     per-hour generation ceiling was hit.
+ *   - `request_error` (instrumentation.ts) — an uncaught server error (render,
+ *     route handler, action, or the proxy.ts access gate).
+ *   - `client_error` (app/api/client-error/route.ts) — a browser-side render
+ *     error reported by app/error.tsx or app/global-error.tsx.
  *
  * Alerting is best-effort and must NEVER throw into or block the caller: a down
  * Telegram can't be allowed to fail a request or mask the original error.
@@ -78,7 +91,63 @@ export async function monitor(
   // even when stdout is quieted; a drain matches on the JSON `type` field.
   // Every event is logged, including ones the throttle keeps out of Telegram.
   console.warn(JSON.stringify(payload));
-  await pushAlert(payload);
+  await Promise.all([pushAlert(payload), writeEvent(event, fields)]);
+}
+
+/**
+ * Own tiny pool, deliberately separate from lib/db.ts's — importing `query`
+ * from there would mean this module and lib/db.ts import each other (`query`
+ * calls `monitor` on failure), and more importantly a failed write here must
+ * never itself go through the path that calls `monitor("db_query_failed")`,
+ * which is exactly the recursion the `db_query_failed` skip below guards
+ * against. `max: 1`: this pool only ever does small, infrequent inserts.
+ */
+declare global {
+  var __noumenonMonitorPool: Pool | undefined;
+}
+
+function getMonitorPool(): Pool {
+  if (!globalThis.__noumenonMonitorPool) {
+    const pool = new Pool({ connectionString: config.databaseUrl, max: 1 });
+    pool.on("error", () => {
+      // Same rationale as lib/db.ts's idle-client handler: log only, never
+      // throw into whatever request happens to be running when Neon drops an
+      // idle connection.
+    });
+    globalThis.__noumenonMonitorPool = pool;
+  }
+  return globalThis.__noumenonMonitorPool;
+}
+
+/**
+ * Persist one event to `monitor_events`. Best-effort in every sense: never
+ * throws, never retries, and — critically — never calls `monitor()` on
+ * failure (that would be the recursion this whole function exists to avoid).
+ * `db_query_failed` itself is skipped outright: it already fires on every
+ * request during a DB outage, and writing it TO the DB during a DB outage is
+ * the one case guaranteed to fail.
+ */
+async function writeEvent(
+  event: string,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  if (event === "db_query_failed") return;
+  try {
+    await getMonitorPool().query(
+      `INSERT INTO monitor_events (event, fields, deployment) VALUES ($1, $2, $3)`,
+      [event, JSON.stringify(fields), process.env.VERCEL_DEPLOYMENT_ID ?? null],
+    );
+  } catch {
+    // Best-effort, per the module doc above.
+  }
+}
+
+/** Close the durability pool (tests only; never called per-request). */
+export async function closeMonitorPool(): Promise<void> {
+  if (globalThis.__noumenonMonitorPool) {
+    await globalThis.__noumenonMonitorPool.end();
+    globalThis.__noumenonMonitorPool = undefined;
+  }
 }
 
 /**

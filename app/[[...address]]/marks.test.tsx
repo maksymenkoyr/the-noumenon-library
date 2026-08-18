@@ -194,3 +194,43 @@ describe("leave event", () => {
     expect(events.map((e) => e.e)).toEqual(["arrive", "visible", "leave"]);
   });
 });
+
+describe("like toggle", () => {
+  /**
+   * Regression for the launch-blocker fix (§2.3): a failed /api/like write
+   * used to leave the optimistic count in place, so a reader could see a
+   * like that never reached the server's aggregate. The local mark
+   * (localStorage) is deliberately left alone — that's the reader's own
+   * gesture, not the server sync — only the shared count reverts, and the
+   * failure gets reported (lib/reportClientError.ts → /api/client-error).
+   */
+  it("reverts the optimistic count and reports when the like write fails", async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      if (url === "/api/like") return Promise.reject(new Error("network down"));
+      return Promise.resolve(new Response(null, { status: 204 })); // /api/client-error
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    mount("11/1/1/1/1");
+    const likeButton = container.querySelectorAll("button")[0];
+
+    await act(async () => {
+      likeButton.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // The mark still shows liked (local gesture kept), but the count reverted
+    // to 0 rather than the optimistic 1 — the write never actually landed.
+    expect(container.textContent).toContain("liked · 0 readers");
+    expect(
+      fetchMock.mock.calls.some(([url, init]) => {
+        if (url !== "/api/client-error") return false;
+        const body = JSON.parse((init as RequestInit).body as string);
+        return body.message === "network down";
+      }),
+    ).toBe(true);
+
+    unmount();
+  });
+});
