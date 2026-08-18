@@ -123,6 +123,10 @@ describe("buildPrompt", () => {
       "no-sequence",
       "no-abstraction",
       "no-past",
+      "no-aboutness",
+      "no-prose",
+      "no-spoken-language",
+      "no-english",
     ]);
   });
 

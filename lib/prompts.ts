@@ -198,6 +198,24 @@ export interface PromptConstraint {
  * are also the only remaining lever that constrains *what kind of thing* the
  * text is, which matters more than it looks: every prompt format tested
  * produced the same literary-vignette register without them.
+ *
+ * `no-aboutness` through `no-english` were added against a specific finding
+ * in `wander-eval-2026-07-31-base-v1.md`: every hollow page in that sample ran
+ * the same arc — a premise, an anecdote illustrating it, a closing passage
+ * explaining the premise back to the reader. "The page arrives already
+ * interpreted. Nothing is left for the reader to do, so there is no reason to
+ * read it twice, so there is no pause." `no-aboutness` targets that arc
+ * directly. The same sample also found register spread narrow — twelve of
+ * fourteen pages were literary-realist prose in contemporary English, no
+ * verse, no document, no translation — which `no-prose`, `no-spoken-language`,
+ * and `no-english` push against, each proscriptively rather than by naming a
+ * destination register. `no-spoken-language` is the invented-tongue dial: it
+ * forbids reaching for any language that has ever been spoken without naming
+ * or modeling one to imitate, so the model has to invent rather than pastiche.
+ * `no-english` is held far lower than the others — a whole page in a real
+ * non-English language is unreadable to most visitors, which is a cost the
+ * invented-tongue dial above does not carry (invented text is equally opaque
+ * to everyone).
  */
 export const GENERATION_CONSTRAINTS: readonly PromptConstraint[] = [
   {
@@ -226,6 +244,26 @@ export const GENERATION_CONSTRAINTS: readonly PromptConstraint[] = [
     id: "no-past",
     text: "Nothing in it is described as having already happened.",
     probability: 0.15,
+  },
+  {
+    id: "no-aboutness",
+    text: "Nothing in it explains what it is about.",
+    probability: 0.2,
+  },
+  {
+    id: "no-prose",
+    text: "Nothing in it is written in continuous prose.",
+    probability: 0.08,
+  },
+  {
+    id: "no-spoken-language",
+    text: "Nothing in it is written in a language that has ever been spoken.",
+    probability: 0.05,
+  },
+  {
+    id: "no-english",
+    text: "Nothing in it is written in English.",
+    probability: 0.04,
   },
 ];
 

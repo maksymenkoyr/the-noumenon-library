@@ -66,6 +66,7 @@ export interface ResolvedPage {
   ending?: string;
   actualWords?: number;
   cut?: boolean;
+  damage?: string;
 }
 
 /**
@@ -95,6 +96,7 @@ export function devFields(
   | "ending"
   | "actualWords"
   | "cut"
+  | "damage"
 > {
   if (!inputs) return { model: fallbackModel ?? undefined };
   return {
@@ -115,6 +117,7 @@ export function devFields(
     ending: inputs.ending,
     actualWords: inputs.actualWords,
     cut: inputs.cut,
+    damage: inputs.damage,
   };
 }
 

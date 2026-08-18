@@ -8,8 +8,21 @@ import {
 import { moderate, type ModerationResult } from "./moderate";
 import { monitor } from "./monitor";
 import { applyEnding } from "./pageCut";
+import { applyDamage } from "./pageDamage";
 import type { PromptSegment } from "./prompts";
 import { contentExistsElsewhere, hashContent, type PageInputs } from "./store";
+
+/**
+ * Word count of the text as it will actually be stored, matching the
+ * convention `\S+`-run count used throughout (lib/pageCut.ts, lib/pageDamage.ts).
+ * Needed here because damage can change the count `applyEnding` reported —
+ * `lacuna` collapses a span into one mark, `stutter` inserts a decaying
+ * prefix — and `actualWords` must describe what the reader gets, not what
+ * the cut alone produced.
+ */
+function wordCount(text: string): number {
+  return (text.match(/\S+/g) ?? []).length;
+}
 
 /**
  * One generation attempt after its ending has been applied — the text as it
@@ -26,6 +39,10 @@ interface Attempt {
   promptSegments: PromptSegment[];
   words: number;
   cut: boolean;
+  // The damage actually applied (lib/pageDamage.ts) — may read "none" even
+  // when the drawn lever wasn't, if the cut page came out too short to damage
+  // safely. Provenance must record what happened, not what was drawn.
+  damage: string;
 }
 
 /**
@@ -81,6 +98,7 @@ function inputsFrom(
     // than a choice, and the signal to look at when tuning.
     actualWords: attempt.words,
     cut: attempt.cut,
+    damage: attempt.damage,
     prompt,
     promptSegments: attempt.promptSegments,
     moderationModel,
@@ -105,6 +123,9 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
   // The drawn ending is applied *here*, before anything else sees the text:
   // moderation, the dedup hash, and the stored row must all be the page the
   // reader actually gets, not the longer draft it was cut from (lib/pageCut.ts).
+  // Damage (lib/pageDamage.ts) is applied right after, for the same reason —
+  // and only after the cut, so damage never lands on words the page didn't
+  // keep, and a `stutter`/`lacuna` span can't straddle the seam a cut just made.
   const run = async (l: GenerationLevers): Promise<Attempt> => {
     const result = await generatePage(l);
     usage.tokens += result.usage.tokens;
@@ -114,12 +135,14 @@ export async function generatePipeline(address: string): Promise<PipelineResult>
     l.provider = result.provider;
     l.maxTokens = result.maxTokens;
     const cut = applyEnding(result.text, l.ending, l.pageWords);
+    const damaged = applyDamage(cut.text, l.damage);
     return {
-      text: cut.text,
+      text: damaged.text,
       prompt: result.prompt,
       promptSegments: result.promptSegments,
-      words: cut.words,
+      words: wordCount(damaged.text),
       cut: cut.cut,
+      damage: damaged.damage,
     };
   };
   // Runs moderation and folds in its wall time, kept separate from generation

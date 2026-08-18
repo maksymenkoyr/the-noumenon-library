@@ -49,6 +49,7 @@ const levers: GenerationLevers = {
   start: "mid-sentence",
   startPhrase: "mid-sentence",
   ending: "cut-hard",
+  damage: "none",
   promptVariant: "base-v3",
   constraints: [],
 };
