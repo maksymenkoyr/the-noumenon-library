@@ -132,8 +132,10 @@ export const config = {
   // a hot base should explore a real range. #26 narrowed it to 0.1 instead, and
   // that decision stands: the page-ending and gallery-seed levers turned out to
   // move the distribution far more than temperature does, so the wide band was
-  // buying noise rather than variety.
-  temperatureJitter: nonNegative("GENERATION_TEMPERATURE_JITTER", 0.1),
+  // buying noise rather than variety. It now defaults to 0 (off): every page
+  // runs at exactly its model row's base temperature. The rng draw in
+  // jitteredTemperature still happens, so the seed → lever mapping is unchanged.
+  temperatureJitter: nonNegative("GENERATION_TEMPERATURE_JITTER", 0),
   // Page-size constraint (docs/reference/generation.md), stated in the
   // prompt. The per-call token cap for generation/moderation comes from the
   // chosen model_registry row's max_tokens (lib/registry.ts).
