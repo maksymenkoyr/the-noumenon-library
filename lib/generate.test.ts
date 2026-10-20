@@ -1,6 +1,14 @@
 import { readFileSync } from "node:fs";
 import OpenAI from "openai";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 vi.hoisted(() => {
   process.env.DATABASE_URL =
@@ -10,8 +18,12 @@ vi.hoisted(() => {
 
 const createMock = vi.fn();
 vi.mock("./providers", async () => {
-  const actual = await vi.importActual<typeof import("./providers")>("./providers");
-  return { ...actual, getClient: () => ({ chat: { completions: { create: createMock } } }) };
+  const actual =
+    await vi.importActual<typeof import("./providers")>("./providers");
+  return {
+    ...actual,
+    getClient: () => ({ chat: { completions: { create: createMock } } }),
+  };
 });
 
 // chooseLevers asks the gallery for its association terms. Stub the network
@@ -37,7 +49,10 @@ import { buildPrompt, GENERATION_CONSTRAINTS, joinSegments } from "./prompts";
 
 /** A minimal fake OpenAI chat completion. */
 function completion(content: string, totalTokens = 0) {
-  return { choices: [{ message: { content } }], usage: { total_tokens: totalTokens } };
+  return {
+    choices: [{ message: { content } }],
+    usage: { total_tokens: totalTokens },
+  };
 }
 
 const levers: GenerationLevers = {
@@ -52,6 +67,18 @@ const levers: GenerationLevers = {
   promptVariant: "base-v3",
   constraints: [],
 };
+
+// Temperature jitter is off by default (lib/config.ts). Tests that use the
+// temperature draw as a proxy for "this lever was reseeded" switch it on.
+async function withJitter(fn: () => Promise<void>) {
+  const saved = config.temperatureJitter;
+  config.temperatureJitter = 0.1;
+  try {
+    await fn();
+  } finally {
+    config.temperatureJitter = saved;
+  }
+}
 
 beforeAll(async () => {
   await query(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
@@ -77,7 +104,9 @@ afterAll(async () => {
 describe("generatePage fallback", () => {
   it("falls back to the next pool model on a retryable error (429)", async () => {
     createMock
-      .mockRejectedValueOnce(new OpenAI.APIError(429, undefined, "rate limited", undefined))
+      .mockRejectedValueOnce(
+        new OpenAI.APIError(429, undefined, "rate limited", undefined),
+      )
       .mockResolvedValueOnce(completion("fallback text", 42));
 
     const result = await generatePage(levers);
@@ -91,14 +120,18 @@ describe("generatePage fallback", () => {
 
   it("falls back on a 5xx and on a connection error, not just 429", async () => {
     createMock
-      .mockRejectedValueOnce(new OpenAI.APIError(503, undefined, "unavailable", undefined))
+      .mockRejectedValueOnce(
+        new OpenAI.APIError(503, undefined, "unavailable", undefined),
+      )
       .mockResolvedValueOnce(completion("recovered", 10));
     const result = await generatePage(levers);
     expect(result.model).toBe("model-b");
 
     createMock.mockReset();
     createMock
-      .mockRejectedValueOnce(new OpenAI.APIConnectionError({ message: "ECONNRESET" }))
+      .mockRejectedValueOnce(
+        new OpenAI.APIConnectionError({ message: "ECONNRESET" }),
+      )
       .mockResolvedValueOnce(completion("recovered again", 10));
     const result2 = await generatePage(levers);
     expect(result2.model).toBe("model-b");
@@ -106,7 +139,9 @@ describe("generatePage fallback", () => {
 
   it("falls back on a 404 (delisted model) and marks it permanently unavailable", async () => {
     createMock
-      .mockRejectedValueOnce(new OpenAI.APIError(404, undefined, "not found", undefined))
+      .mockRejectedValueOnce(
+        new OpenAI.APIError(404, undefined, "not found", undefined),
+      )
       .mockResolvedValueOnce(completion("fallback", 5));
 
     const result = await generatePage(levers);
@@ -233,7 +268,9 @@ describe("generatePage fallback", () => {
 
   it("marks a 429'd model cooling so a later selection skips it", async () => {
     createMock
-      .mockRejectedValueOnce(new OpenAI.APIError(429, undefined, "rate limited", undefined))
+      .mockRejectedValueOnce(
+        new OpenAI.APIError(429, undefined, "rate limited", undefined),
+      )
       .mockResolvedValueOnce(completion("fallback", 5));
 
     await generatePage(levers);
@@ -267,14 +304,23 @@ describe("chooseLevers", () => {
     const b = await chooseLevers("gallery/1/2/3/4");
     expect(b.model).toBe(a.model);
     expect(b.temperature).toBe(a.temperature);
-    expect(b.constraints.map((c) => c.id)).toEqual(a.constraints.map((c) => c.id));
+    expect(b.constraints.map((c) => c.id)).toEqual(
+      a.constraints.map((c) => c.id),
+    );
   });
 
   it("draws a different sample on a regeneration attempt", async () => {
-    const first = await chooseLevers("gallery/1/2/3/4", 0);
-    const retry = await chooseLevers("gallery/1/2/3/4", 1);
-    // Temperature is continuous; a different seed effectively never collides.
-    expect(retry.temperature).not.toBe(first.temperature);
+    await withJitter(async () => {
+      const first = await chooseLevers("gallery/1/2/3/4", 0);
+      const retry = await chooseLevers("gallery/1/2/3/4", 1);
+      // Temperature is continuous; a different seed effectively never collides.
+      expect(retry.temperature).not.toBe(first.temperature);
+    });
+  });
+
+  it("uses the model row's base temperature exactly when jitter is off", async () => {
+    const result = await chooseLevers("gallery/1/2/3/4");
+    expect(result.temperature).toBe(0.9);
   });
 
   it("samples constraints from the seed — deterministic, and address-dependent", async () => {
@@ -291,7 +337,8 @@ describe("chooseLevers", () => {
 
     // Whatever fired is reflected in the provenance variant suffix.
     const one = await chooseLevers("addr-0");
-    const expected = "base-v3" + one.constraints.map((c) => `+${c.id}`).join("");
+    const expected =
+      "base-v3" + one.constraints.map((c) => `+${c.id}`).join("");
     expect(provenanceVariant(one)).toBe(expected);
     expect(GENERATION_CONSTRAINTS.length).toBeGreaterThan(0);
   });
@@ -309,25 +356,29 @@ describe("chooseLevers", () => {
   });
 
   it("gives every page of a volume the same seed term", async () => {
-    const first = await chooseLevers("bmw89/3/2/17/1");
-    const middle = await chooseLevers("bmw89/3/2/17/206");
-    const last = await chooseLevers("bmw89/3/2/17/410");
-    expect(SEED_TERMS).toContain(first.seedTerm);
-    expect(middle.seedTerm).toBe(first.seedTerm);
-    expect(last.seedTerm).toBe(first.seedTerm);
-    // ...while the page-seeded levers still vary across those same pages.
-    // Temperature is the proxy: a continuous draw, so unlike the four-valued
-    // edge seams it effectively never collides by chance.
-    expect(middle.temperature).not.toBe(first.temperature);
+    await withJitter(async () => {
+      const first = await chooseLevers("bmw89/3/2/17/1");
+      const middle = await chooseLevers("bmw89/3/2/17/206");
+      const last = await chooseLevers("bmw89/3/2/17/410");
+      expect(SEED_TERMS).toContain(first.seedTerm);
+      expect(middle.seedTerm).toBe(first.seedTerm);
+      expect(last.seedTerm).toBe(first.seedTerm);
+      // ...while the page-seeded levers still vary across those same pages.
+      // Temperature is the proxy: a continuous draw, so unlike the four-valued
+      // edge seams it effectively never collides by chance.
+      expect(middle.temperature).not.toBe(first.temperature);
+    });
   });
 
   it("keeps the volume's seed term across a regeneration attempt", async () => {
     // A moderation/dedup retry redraws every page-seeded lever, but the book
     // it belongs to must not change subject mid-volume.
-    const first = await chooseLevers("bmw89/3/2/17/1", 0);
-    const retry = await chooseLevers("bmw89/3/2/17/1", 1);
-    expect(retry.seedTerm).toBe(first.seedTerm);
-    expect(retry.temperature).not.toBe(first.temperature);
+    await withJitter(async () => {
+      const first = await chooseLevers("bmw89/3/2/17/1", 0);
+      const retry = await chooseLevers("bmw89/3/2/17/1", 1);
+      expect(retry.seedTerm).toBe(first.seedTerm);
+      expect(retry.temperature).not.toBe(first.temperature);
+    });
   });
 
   it("draws start and ending independently, and reproducibly", async () => {
