@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { cookies } from "next/headers";
+import type { Metadata } from "next";
+import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import {
@@ -16,7 +17,9 @@ import { getLikeCount } from "@/lib/engagement";
 import { INTRO_COOKIE } from "@/lib/intro";
 import type { PromptSegment } from "@/lib/prompts";
 import { devFields, resolvePage, type ResolvedPage } from "@/lib/resolvePage";
+import { SITE_DESCRIPTION, SITE_TITLE, socialMetadata } from "@/lib/siteMetadata";
 import { getPage } from "@/lib/store";
+import { isUnfurlBot } from "@/lib/unfurlBots";
 import { DevBadge } from "./dev-badge";
 import { IntroExperience } from "./intro-experience";
 import { CrystallizingPage, PageContent, PlaceholderPage } from "./page-content";
@@ -26,6 +29,22 @@ import { Report } from "./report";
 
 export const runtime = "nodejs";
 export const maxDuration = 60; // Hobby cap; generations run 8–32s
+
+/**
+ * A shared address previews under its own name. Reads only the address
+ * string: a preview fetcher must never be the thing that triggers a paid
+ * generation. The bare root and invalid addresses keep the layout's title.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ address?: string[] }>;
+}): Promise<Metadata> {
+  const { address: segments } = await params;
+  const address = segments && normalizeAddress(segments);
+  if (!address) return {};
+  return socialMetadata(`${formatAddress(address)} · ${SITE_TITLE}`);
+}
 
 export default async function Page({
   params,
@@ -42,8 +61,16 @@ export default async function Page({
   await connection();
 
   const { address: segments } = await params;
-  // The bare root is the random entry into the library.
-  if (!segments) redirect(addressPath(randomAddress()));
+  // Link-preview fetchers (lib/unfurlBots) get an answer that costs nothing:
+  // app/robots.ts lets them in on that promise.
+  const unfurlBot = isUnfurlBot((await headers()).get("user-agent"));
+  // The bare root is the random entry into the library. A preview fetcher
+  // would follow that redirect and card a random address instead of the
+  // site, so it gets the site's own tags on a plain 200.
+  if (!segments) {
+    if (unfurlBot) return <SiteCard />;
+    redirect(addressPath(randomAddress()));
+  }
 
   const address = normalizeAddress(segments);
   // notFound() must fire before any Suspense boundary so an invalid address gets
@@ -93,11 +120,23 @@ export default async function Page({
         />
       ) : existing?.status === "taken_down" ? (
         <PlaceholderPage variant="taken_down" />
+      ) : unfurlBot ? (
+        <PlaceholderPage variant="explore" />
       ) : (
         <Suspense fallback={<CrystallizingPage />}>
           <PageBody address={canonical} devMode={devMode} />
         </Suspense>
       )}
+    </main>
+  );
+}
+
+/** What a preview fetcher sees at the bare root, in place of the redirect. */
+function SiteCard() {
+  return (
+    <main className="mx-auto flex w-full max-w-2xl grow flex-col justify-center gap-4 p-8 text-center">
+      <h1 className="font-serif text-2xl">{SITE_TITLE}</h1>
+      <p className="font-serif italic text-neutral-500">{SITE_DESCRIPTION}</p>
     </main>
   );
 }

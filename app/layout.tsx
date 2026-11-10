@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Geist, Geist_Mono, Lora } from "next/font/google";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
+import { config } from "@/lib/config";
+import { socialMetadata } from "@/lib/siteMetadata";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,9 +30,8 @@ const lora = Lora({
 });
 
 export const metadata: Metadata = {
-  title: "The Noumenon Library",
-  description:
-    "An infinite library where every text that could ever be written already exists.",
+  metadataBase: new URL(config.publicBaseUrl),
+  ...socialMetadata(),
 };
 
 export default function RootLayout({
