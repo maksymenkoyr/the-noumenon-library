@@ -242,4 +242,10 @@ export const config = {
   // that redeem into an HMAC-signed session cookie. Unset (local
   // dev, or an intentionally public deploy) => gate is inert, site is open.
   accessSigningSecret: process.env.ACCESS_SIGNING_SECRET ?? "",
+  // The site's absolute public URL. Preview fetchers only load an og:image
+  // given as an absolute URL, so app/layout.tsx needs this as its
+  // metadataBase. Same env var and fallback as scripts/invite.mjs.
+  get publicBaseUrl() {
+    return process.env.PUBLIC_BASE_URL ?? "https://the-noumenon-library.vercel.app";
+  },
 };
